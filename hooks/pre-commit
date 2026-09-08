@@ -1,0 +1,20 @@
+#!/bin/sh
+# Book Curator — auto-stamp the build version.
+#
+# Hooks don't travel with a clone, so this is the master copy. Install it with:
+#   cp hooks/pre-commit .git/hooks/pre-commit
+#
+# Whenever shipped app code is committed, re-stamp sw.js's cache name (and
+# app.js's APP_VERSION to match) so installed phones are told there's an update.
+# Forgetting that bump by hand was how phones ended up a version behind.
+
+changed=$(git diff --cached --name-only)
+
+case "$changed" in
+  *index.html*|*app.js*)
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./bump-version.ps1 || exit 1
+    git add sw.js app.js
+    ;;
+esac
+
+exit 0

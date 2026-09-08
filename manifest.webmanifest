@@ -1,0 +1,16 @@
+{
+  "name": "Book Curator",
+  "short_name": "Book Curator",
+  "description": "Photograph bookshelves for the Book Curator read — one labelled photo per shelf, checked for legibility, saved to your own Google Drive.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101013",
+  "theme_color": "#101013",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
