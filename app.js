@@ -13,7 +13,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20260908-191010';
+const APP_VERSION = '20260908-194840';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -951,8 +951,10 @@ async function shareFolder(folderId, folderName, st) {
         toast('Not shared — the folder stays private to you', 4500);
         return;
       }
+      // No email anywhere in the flow (owner, 8 Sep 2026): the curator finds the
+      // folder under "Shared with me" and the sheet importer reads it from there.
       await drive('https://www.googleapis.com/drive/v3/files/' + folderId +
-        '/permissions?sendNotificationEmail=true&fields=id', {
+        '/permissions?sendNotificationEmail=false&fields=id', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'user', role: 'reader', emailAddress: email }),
