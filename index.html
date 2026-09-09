@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#101013">
-<title>Book Curator</title>
+<title>Books Curator</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
@@ -229,7 +229,7 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
 <body>
 <header>
   <button id="btnBack" class="iconbtn hidden" aria-label="Back">‹</button>
-  <h1 id="title">Book Curator</h1>
+  <h1 id="title">Books Curator</h1>
   <button id="btnSettings" class="iconbtn" aria-label="Settings">⚙</button>
 </header>
 <main>
@@ -237,7 +237,7 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
 <section id="scr-home" class="active">
   <div id="iosInstall" class="installcard hidden">
     <button id="btnIosDismiss" class="ix" aria-label="Dismiss">×</button>
-    <h3>Add Book Curator to your Home Screen</h3>
+    <h3>Add Books Curator to your Home Screen</h3>
     <p>Tap <svg class="shareglyph" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg> <b>Share</b> at the bottom of the screen, then <b>Add to Home Screen</b>.</p>
     <p class="hint">Installed, it opens full-screen and works offline — and iPhone stops clearing your saved shelves after a week of not opening it.</p>
   </div>
@@ -354,15 +354,15 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
   <p id="builtinNote" class="hint hidden" style="margin-bottom:10px">Nothing to set up — this copy of the app already has its Google details built in. Tap <b>Upload</b>, sign in with your own Google account, and allow access. Your photos stay in <b>your</b> Drive.</p>
   <label class="field" for="inShareWith">Share uploads with <span class="lbl-opt">— email address</span></label>
   <input type="email" id="inShareWith" autocomplete="off" inputmode="email" placeholder="nobody — uploads stay private">
-  <p class="hint">The first upload offers to share the <b>Book Curator</b> folder only, read-only, with this address, so the curator can read your shelves without you arranging anything in Drive. You stay the owner and can stop sharing at any time from Drive. Leave it empty and nothing is ever shared.</p>
+  <p class="hint">The first upload offers to share the <b>Books Curator</b> folder only, read-only, with this address, so the curator can read your shelves without you arranging anything in Drive. You stay the owner and can stop sharing at any time from Drive. Leave it empty and nothing is ever shared.</p>
 
   <label class="field" for="inDriveFolder">Drive folder for uploads</label>
   <div class="linkrow">
-    <input type="text" id="inDriveFolder" autocomplete="off" placeholder="Book Curator">
+    <input type="text" id="inDriveFolder" autocomplete="off" placeholder="Books Curator">
     <button id="btnLink">Link…</button>
   </div>
   <p id="linkNote" class="hint"></p>
-  <p class="hint">Normally leave this as <b>Book Curator</b>: the app creates that folder in your own Drive on the first upload and files shelves under <b>Book Curator / _Shelves / &lt;shelf label&gt;</b>. <b>Link…</b> is only for a folder that already exists or was shared with you.</p>
+  <p class="hint">Normally leave this as <b>Books Curator</b>: the app creates that folder in your own Drive on the first upload and files shelves under <b>Books Curator / _Shelves / &lt;shelf label&gt;</b>. <b>Link…</b> is only for a folder that already exists or was shared with you.</p>
 
   <details style="margin-top:16px">
     <summary>Advanced: use your own Google project</summary>

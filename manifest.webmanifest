@@ -1,7 +1,7 @@
 {
-  "name": "Book Curator",
-  "short_name": "Book Curator",
-  "description": "Photograph bookshelves for the Book Curator read — one labelled photo per shelf, checked for legibility, saved to your own Google Drive.",
+  "name": "Books Curator",
+  "short_name": "Books Curator",
+  "description": "Photograph bookshelves for the Books Curator read — one labelled photo per shelf, checked for legibility, saved to your own Google Drive.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

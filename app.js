@@ -1,6 +1,6 @@
 'use strict';
 
-/* Book Curator — phone capture app, Shelf mode.
+/* Books Curator — phone capture app, Shelf mode.
  *
  * A separate project from Vinyl Curator; the machinery that is proven there
  * (IndexedDB store, camera, background Drive upload queue, folder sharing,
@@ -8,12 +8,12 @@
  * between the two apps stays readable. The vinyl domain (shot table, crop,
  * matrix dictation) is not here. This slice records SHELVES only: one labelled
  * photo (or a few overlapping frames) per shelf, checked for legibility,
- * uploaded to the client's own Drive under Book Curator/_Shelves/<label>/.
+ * uploaded to the client's own Drive under Books Curator/_Shelves/<label>/.
  */
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20260908-194840';
+const APP_VERSION = '20260909-163901';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -75,7 +75,7 @@ async function photosFor(shelfId) {
  * out of the Cloud console entirely: they tap Upload, sign in with their own
  * Google account, allow.
  *
- * Book Curator has ITS OWN Cloud project and OAuth client (owner's decision,
+ * Books Curator has ITS OWN Cloud project and OAuth client (owner's decision,
  * 8 Sep 2026). Never paste the Vinyl Curator client id here: under the
  * drive.file scope an app sees only the folders created under its own client
  * id, so a client id can never be changed once a client has uploaded, and the
@@ -95,20 +95,20 @@ const BUILTIN = {
 const settings = {
   clientId: '', apiKey: '', projectNumber: '', shareWith: '',
   operator: '', quality: 0.95,
-  driveFolder: 'Book Curator', driveFolderId: '',
+  driveFolder: 'Books Curator', driveFolderId: '',
 };
 // What the app should actually use: an explicit Settings entry always wins.
 function cred(k) { return String(settings[k] || BUILTIN[k] || '').trim(); }
 async function loadSettings() {
   const s = await dbGet('kv', 'settings');
   if (s) Object.assign(settings, s);
-  if (!settings.driveFolder) settings.driveFolder = 'Book Curator';
+  if (!settings.driveFolder) settings.driveFolder = 'Books Curator';
 }
 async function saveSettings() { await dbPut('kv', { ...settings }, 'settings'); }
 
 /* ---------- navigation ---------- */
 let backAction = null;
-function show(id, { title = 'Book Curator', back = null, gear = false } = {}) {
+function show(id, { title = 'Books Curator', back = null, gear = false } = {}) {
   stopVoice();   // any screen change cancels an in-progress dictation
   $$('main > section').forEach(s => s.classList.toggle('active', s.id === id));
   $('#title').textContent = title;
@@ -132,7 +132,7 @@ async function goHome() {
   stopCam();
   stopLevel();
   freeGate();
-  show('scr-home', { title: 'Book Curator', gear: true });
+  show('scr-home', { title: 'Books Curator', gear: true });
   const all = (await dbAll('shelves')).sort((a, b) => b.created - a.created);
   const shelves = all.filter(s => !s.uploaded);
   const hiddenCount = all.length - shelves.length;
@@ -905,11 +905,11 @@ async function pickFolder() {
   });
 }
 // The client-side root: the linked folder when one was picked, otherwise
-// find-or-create "Book Curator" at the top of My Drive. Never "Vinyl Curator";
+// find-or-create "Books Curator" at the top of My Drive. Never "Vinyl Curator";
 // the two importers must never see each other's folders.
 async function resolveRootFolder() {
   const id = settings.driveFolderId;
-  if (!id) return findOrCreateFolder(settings.driveFolder || 'Book Curator', 'root');
+  if (!id) return findOrCreateFolder(settings.driveFolder || 'Books Curator', 'root');
   try {
     const f = await drive('https://www.googleapis.com/drive/v3/files/' + id + '?fields=id,trashed');
     if (f && f.id && !f.trashed) return f.id;
@@ -1032,9 +1032,9 @@ async function prepareUpload(st) {
   if (!cred('clientId')) throw new Error('This build has no Google Client ID yet — add one in ⚙ Settings');
   st('Signing in to Google…');
   await getToken();
-  st('Finding your Book Curator folder…');
+  st('Finding your Books Curator folder…');
   const id = await resolveRootFolder();
-  const name = settings.driveFolder || 'Book Curator';
+  const name = settings.driveFolder || 'Books Curator';
   rootCache = { id, name };
   await shareFolder(id, name, st);
   return rootCache;
@@ -1077,7 +1077,7 @@ async function uploadShelf(sh) {
     const photos = await photosFor(sh.id);
     if (!photos.length) throw new Error('Nothing to upload — no photos saved');
     await setUpload(sh, { state: 'uploading', done: 0, total: photos.length + 1, error: '' });
-    if (!rootCache) rootCache = { id: await resolveRootFolder(), name: settings.driveFolder || 'Book Curator' };
+    if (!rootCache) rootCache = { id: await resolveRootFolder(), name: settings.driveFolder || 'Books Curator' };
     const shelvesFolder = await findOrCreateFolder(SHELVES_FOLDER, rootCache.id);
     const folder = await shelfFolderFor(sh, shelvesFolder);
     sh.driveFolderId = folder.id;
@@ -1203,7 +1203,7 @@ async function openArchive() {
   list.innerHTML = '';
   const done = (await dbAll('shelves')).filter(s => s.uploaded).sort((a, b) => b.uploaded - a.uploaded);
   $('#arcStatus').textContent = done.length
-    ? 'These are in your Google Drive under Book Curator / _Shelves. The photos are still on this phone until you delete them.'
+    ? 'These are in your Google Drive under Books Curator / _Shelves. The photos are still on this phone until you delete them.'
     : 'Nothing uploaded yet.';
   for (const sh of done) {
     const photos = await photosFor(sh.id);
@@ -1241,7 +1241,7 @@ function openSettings() {
   $('#inShareWith').placeholder = BUILTIN.shareWith || 'nobody — uploads stay private';
   $('#inClientId').placeholder = BUILTIN.clientId || 'xxxxxxxx.apps.googleusercontent.com';
   $('#builtinNote').classList.toggle('hidden', !BUILTIN.clientId);
-  $('#inDriveFolder').value = settings.driveFolder || 'Book Curator';
+  $('#inDriveFolder').value = settings.driveFolder || 'Books Curator';
   $('#inQuality').value = String(settings.quality || 0.95);
   renderLinkNote();
   show('scr-settings', { title: 'Settings', back: goHome });
@@ -1265,7 +1265,7 @@ async function syncCredsFromForm() {
 }
 $('#btnLink').onclick = async () => {
   if (settings.driveFolderId) {
-    if (!confirm('Unlink the Drive folder? Uploads go back to a “' + (settings.driveFolder || 'Book Curator') + '” folder the app creates in My Drive.')) return;
+    if (!confirm('Unlink the Drive folder? Uploads go back to a “' + (settings.driveFolder || 'Books Curator') + '” folder the app creates in My Drive.')) return;
     settings.driveFolderId = '';
     rootCache = null;
     await saveSettings();
@@ -1296,7 +1296,7 @@ $('#btnSaveSettings').onclick = async () => {
   const shareWas = cred('shareWith');
   settings.shareWith = $('#inShareWith').value.trim();
   if (cred('shareWith') !== shareWas) await dbPut('kv', {}, 'sharedFolders');
-  const folder = sanitize($('#inDriveFolder').value) || 'Book Curator';
+  const folder = sanitize($('#inDriveFolder').value) || 'Books Curator';
   if (folder !== settings.driveFolder) { settings.driveFolderId = ''; rootCache = null; }
   settings.driveFolder = folder;
   settings.quality = Number($('#inQuality').value) || 0.95;
@@ -1310,7 +1310,7 @@ $('#btnWipe').onclick = async () => {
   await dbClear('photos');
   await dbClear('shelves');
   await dbClear('kv');
-  Object.assign(settings, { clientId: '', apiKey: '', projectNumber: '', shareWith: '', operator: '', quality: 0.95, driveFolder: 'Book Curator', driveFolderId: '' });
+  Object.assign(settings, { clientId: '', apiKey: '', projectNumber: '', shareWith: '', operator: '', quality: 0.95, driveFolder: 'Books Curator', driveFolderId: '' });
   toast('All app data deleted');
   goHome();
 };

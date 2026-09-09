@@ -1,4 +1,4 @@
-# Book Curator
+# Books Curator
 
 A camera app for photographing bookshelves on a phone, so a curator can read the
 spines remotely and say which volumes are worth a closer look. It records one
@@ -20,16 +20,16 @@ label.
 
 Files land in your Drive as:
 
-    Book Curator / _Shelves / Study, case 2, shelf 3 / 01.jpg
-    Book Curator / _Shelves / Study, case 2, shelf 3 / 02.jpg
-    Book Curator / _Shelves / Study, case 2, shelf 3 / shelf.json
+    Books Curator / _Shelves / Study, case 2, shelf 3 / 01.jpg
+    Books Curator / _Shelves / Study, case 2, shelf 3 / 02.jpg
+    Books Curator / _Shelves / Study, case 2, shelf 3 / shelf.json
 
 Shelf photos are kept at the camera's full resolution: the small type at the
 foot of a spine is what the read needs.
 
 ## Getting it on your phone
 
-Open https://pnicol66-sketch.github.io/book-curator/ on the phone and install it —
+Open https://pnicol66-sketch.github.io/books-curator/ on the phone and install it —
 Android: **Install app on this phone** on the home screen (or menu ⋮ → Install
 app); iPhone: **Share** → **Add to Home Screen**, which the app prompts for. It
 then runs full-screen and works offline after the first load.
@@ -37,14 +37,14 @@ then runs full-screen and works offline after the first load.
 ## Saving to Google Drive
 
 Tap **Upload**, sign in with your own Google account, allow. The app uploads
-into `My Drive / Book Curator / _Shelves / <label>/` and queues the shelf so the
+into `My Drive / Books Curator / _Shelves / <label>/` and queues the shelf so the
 photos go up in the background while the next shelf is being shot; **Upload all
 finished shelves** on the home screen sends a whole visit's shelves after one
 sign-in. The queue survives an app close and resumes on the next open.
 
 The app requests only Google's `drive.file` scope: it can see and write the
 folders it created itself and nothing else in your Drive. On the first upload it
-asks whether to share the Book Curator folder, read-only, with the curator; you
+asks whether to share the Books Curator folder, read-only, with the curator; you
 stay the owner, nothing else in your Drive is shared, and you can stop sharing
 at any time from Drive itself. Declining is remembered too.
 

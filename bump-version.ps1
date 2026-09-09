@@ -1,4 +1,4 @@
-# Book Curator - stamp a new build version
+# Books Curator - stamp a new build version
 #
 # Rewrites the service worker's cache name and app.js's APP_VERSION to the same
 # UTC stamp. Bumping the cache name is what makes installed phones fetch the new

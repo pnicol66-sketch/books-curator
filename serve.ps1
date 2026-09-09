@@ -1,4 +1,4 @@
-# Local test server for Book Curator (PowerShell, no dependencies).
+# Local test server for Books Curator (PowerShell, no dependencies).
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add('http://localhost:8322/')

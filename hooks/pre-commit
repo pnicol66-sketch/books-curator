@@ -1,5 +1,5 @@
 #!/bin/sh
-# Book Curator — auto-stamp the build version.
+# Books Curator — auto-stamp the build version.
 #
 # Hooks don't travel with a clone, so this is the master copy. Install it with:
 #   cp hooks/pre-commit .git/hooks/pre-commit
