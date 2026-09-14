@@ -62,7 +62,7 @@ at any time from Drive itself. Declining is remembered too.
 
 Everything (photos, labels, settings) is stored locally in the browser on the
 phone. Nothing leaves the phone except when you explicitly upload to your own
-Google Drive. See [privacy.html](privacy.html).
+Google Drive. See [privacy.html](privacy.html) and [terms.html](terms.html).
 
 ## Developer notes
 

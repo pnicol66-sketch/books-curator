@@ -13,7 +13,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20260909-163901';
+const APP_VERSION = '20260914-143937';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -84,7 +84,8 @@ async function photosFor(shelfId) {
  */
 const BUILTIN = {
   // Cloud project "book-curator-tools", consent screen published In production,
-  // authorised JavaScript origins https://pnicol66-sketch.github.io and http://localhost:8322
+  // authorised JavaScript origins https://bookscurator.net, https://pnicol66-sketch.github.io
+  // and http://localhost:8322 (the app moved to bookscurator.net on 14 Sep 2026)
   clientId: '991007809247-3kb4gqf2jfbghp5q34l4sp43f1087174.apps.googleusercontent.com',
   apiKey: '',         // AIza...        - only for the "Link…" picker
   projectNumber: '',  // 000000000000   - only for the "Link…" picker
