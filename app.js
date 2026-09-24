@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20260924-051607';
+const APP_VERSION = '20260924-054833';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -122,9 +122,10 @@ const BUILTIN = {
   apiKey: '',         // AIza...        - only for the "Link…" picker
   projectNumber: '',  // 000000000000   - only for the "Link…" picker
   shareWith: 'pnicol66@gmail.com',
-  // Where the phone asks for its curator's requests (one address for every
-  // client; empty until it exists, and then the Requests card stays hidden).
-  requestsUrl: '',
+  // Where the phone asks for its curator's requests: one address for every
+  // client. It answers only for shelf folder ids its curator has routed, and
+  // Settings > Advanced can override it for testing.
+  requestsUrl: 'https://script.google.com/macros/s/AKfycbzkRU2Dmg_VMjHZtDs5PrHjziX4w8M1d8h8A_8NZuxvbp4UEHIB9Xem_WXWCjqZiSzjRg/exec',
 };
 
 /* ---------- settings ---------- */
@@ -1569,10 +1570,11 @@ async function openRequests() {
   // they went up): kept, with Upload and Delete, so no photo is stranded.
   const started = allBooks.filter(b => !b.uploaded && !items.some(it => it.rid === b.requestId)).sort((a, b) => a.created - b.created);
   if (!items.length) list.innerHTML = '<p class="empty">Nothing waiting.<br>Your curator\'s requests appear here.</p>';
-  // Grouped by shelf, in the order the shelves were shot; within a shelf by photo, then left to right.
+  // Grouped by shelf, in the order the shelves were shot; within a shelf by photo, then
+  // left to right; requests with no spine marked (words only) after the marked ones.
   const groupOf = it => byFolder[it.key] ? byFolder[it.key].label : held[it.key] ? held[it.key].label : (it.where || 'Other');
   const orderOf = it => byFolder[it.key] ? byFolder[it.key].created : Infinity;
-  items.sort((a, b) => (orderOf(a) - orderOf(b)) || groupOf(a).localeCompare(groupOf(b)) ||
+  items.sort((a, b) => (orderOf(a) - orderOf(b)) || groupOf(a).localeCompare(groupOf(b)) || ((a.box ? 0 : 1) - (b.box ? 0 : 1)) ||
     String(a.box && a.box.file || '').localeCompare(String(b.box && b.box.file || '')) || ((a.box ? a.box.x : 2) - (b.box ? b.box.x : 2)));
   let cur = null;
   for (const it of items) {
