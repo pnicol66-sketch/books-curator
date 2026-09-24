@@ -217,6 +217,37 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
   color: var(--text); font-weight: 600; padding: 0 16px; white-space: nowrap;
 }
 #arcStatus { color: var(--dim); font-size: 13.5px; min-height: 20px; margin: 8px 0; }
+/* requests */
+.reqcard {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: var(--card); border: 1px solid var(--accent); border-radius: 14px; padding: 14px; margin-bottom: 14px;
+}
+.reqcard .rc-t { font-weight: 700; font-size: 16px; }
+.reqcard .rc-s { color: var(--dim); font-size: 12.5px; margin-top: 4px; }
+.reqcard .rc-body { flex: 1; min-width: 0; }
+.badge {
+  min-width: 26px; height: 26px; border-radius: 999px; background: var(--accent); color: #191204;
+  font-weight: 800; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; padding: 0 8px;
+}
+#rqsStatus { color: var(--dim); font-size: 13.5px; margin: 4px 0 8px; }
+.reqitem {
+  display: block; width: 100%; text-align: left; background: var(--card); border: 1px solid var(--line);
+  border-radius: 14px; padding: 13px 14px; margin-bottom: 10px;
+}
+.reqitem .rq-t { font-weight: 700; font-size: 16px; }
+.reqitem .rq-a { font-size: 14px; margin-top: 2px; }
+.reqitem .rq-w { color: var(--dim); font-size: 12.5px; margin-top: 6px; }
+.reqitem .rq-s { font-size: 12.5px; margin-top: 6px; color: var(--accent); }
+.reqitem.sent .rq-s { color: var(--ok); }
+#rqTitle { font-size: 19px; font-weight: 700; margin: 2px 0 0; }
+#rqAuthor { font-size: 15px; margin: 3px 0 0; }
+#rqWhere { color: var(--dim); font-size: 13.5px; margin: 10px 0 0; }
+#rqAsked { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 12px 0; font-size: 15px; line-height: 1.4; }
+#rqNote { color: #e0b04a; font-size: 13.5px; margin: 10px 0; }
+.rq-frame { position: relative; overflow: hidden; border-radius: 12px; background: #000; line-height: 0; }
+.rq-frame img { width: 100%; display: block; }
+.rq-box { position: absolute; border: 3px solid var(--accent); border-radius: 3px; box-shadow: 0 0 0 9999px rgba(0,0,0,.55); }
+#rqZoom { display: block; max-width: 100%; margin: 8px auto 0; border-radius: 10px; background: #000; }
 /* toast */
 #toast {
   position: fixed; left: 50%; bottom: calc(30px + env(safe-area-inset-bottom)); transform: translateX(-50%);
@@ -241,6 +272,10 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
     <p>Tap <svg class="shareglyph" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg> <b>Share</b> at the bottom of the screen, then <b>Add to Home Screen</b>.</p>
     <p class="hint">Installed, it opens full-screen and works offline — and iPhone stops clearing your saved shelves after a week of not opening it.</p>
   </div>
+  <button id="reqCard" class="reqcard hidden">
+    <div class="rc-body"><div class="rc-t">Requests</div><div id="reqSub" class="rc-s">Checking…</div></div>
+    <span id="reqCount" class="badge hidden"></span>
+  </button>
   <div id="shelfList"></div>
   <div class="stack">
     <button id="btnNew" class="primary">＋ New shelf</button>
@@ -346,6 +381,23 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
   <div id="arcList"></div>
 </section>
 
+<section id="scr-requests">
+  <div id="rqsStatus"></div>
+  <div id="rqsList"></div>
+  <div class="stack" style="margin-top:14px">
+    <button id="btnReqCheck" class="secondary">Check again</button>
+  </div>
+</section>
+
+<section id="scr-request">
+  <div id="rqTitle"></div>
+  <div id="rqAuthor"></div>
+  <div id="rqWhere"></div>
+  <div id="rqAsked"></div>
+  <div id="rqNote"></div>
+  <div id="rqPhoto"></div>
+</section>
+
 <section id="scr-settings">
   <label class="field" for="inOperator2">Who is shooting <span class="lbl-opt">— goes into every shelf record</span></label>
   <input type="text" id="inOperator2" autocomplete="off" autocapitalize="words" placeholder="e.g. Pat">
@@ -381,6 +433,12 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
     <input type="text" id="inApiKey" autocomplete="off" placeholder="AIza…">
     <label class="field" for="inProjectNumber">Cloud project number <span class="lbl-opt">— only for “Link…”</span></label>
     <input type="text" id="inProjectNumber" inputmode="numeric" autocomplete="off" placeholder="123456789012">
+    <label class="field" for="inRequestsUrl">Request service address <span class="lbl-opt">— leave empty to use the built-in one</span></label>
+    <div class="linkrow">
+      <input type="text" id="inRequestsUrl" autocomplete="off" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec">
+      <button id="btnReqTest">Test</button>
+    </div>
+    <p id="reqTestNote" class="hint"></p>
   </details>
 
   <h2 class="sect">Photo output</h2>

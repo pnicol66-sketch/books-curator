@@ -13,7 +13,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20260914-143937';
+const APP_VERSION = '20260924-023351';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -39,14 +39,25 @@ const CAM_TIP = '📸 Card at the left end · phone sideways · square to the sh
 let _db = null;
 function openDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open('bookcurator', 1);
+    // Version 2 adds the book stores (a Spot-check answer: its record and its
+    // shots). Every store is created behind a guard and nothing existing is ever
+    // touched or re-keyed: shelves live here (never clear site data).
+    const r = indexedDB.open('bookcurator', 2);
     r.onupgradeneeded = () => {
       const d = r.result;
       if (!d.objectStoreNames.contains('shelves')) d.createObjectStore('shelves', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('photos')) d.createObjectStore('photos', { keyPath: ['shelfId', 'n'] });
       if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
+      if (!d.objectStoreNames.contains('books')) d.createObjectStore('books', { keyPath: 'id' });
+      if (!d.objectStoreNames.contains('shots')) d.createObjectStore('shots', { keyPath: ['bookId', 'shotId'] });
     };
-    r.onsuccess = () => res(r.result);
+    // An older page still open in another tab holds version 1 until it closes.
+    r.onblocked = () => toast('Close the other Books Curator tab, then reopen the app', 6000);
+    r.onsuccess = () => {
+      const d = r.result;
+      d.onversionchange = () => d.close();   // a newer version opening elsewhere: let it upgrade
+      res(d);
+    };
     r.onerror = () => rej(r.error);
   });
 }
@@ -90,6 +101,9 @@ const BUILTIN = {
   apiKey: '',         // AIza...        - only for the "Link…" picker
   projectNumber: '',  // 000000000000   - only for the "Link…" picker
   shareWith: 'pnicol66@gmail.com',
+  // Where the phone asks for its curator's requests (one address for every
+  // client; empty until it exists, and then the Requests card stays hidden).
+  requestsUrl: '',
 };
 
 /* ---------- settings ---------- */
@@ -97,6 +111,7 @@ const settings = {
   clientId: '', apiKey: '', projectNumber: '', shareWith: '',
   operator: '', quality: 0.95,
   driveFolder: 'Books Curator', driveFolderId: '',
+  requestsUrl: '',
 };
 // What the app should actually use: an explicit Settings entry always wins.
 function cred(k) { return String(settings[k] || BUILTIN[k] || '').trim(); }
@@ -172,6 +187,8 @@ async function goHome() {
   $('#btnUploadAll').classList.toggle('hidden', uploadable < 1);
   $('#btnUploadAll').textContent = `☁ Upload ${uploadable === 1 ? 'the finished shelf' : uploadable + ' finished shelves'}`;
   refreshUploadCards();
+  renderReqCard();
+  refreshRequests();   // at most once a minute
 }
 async function deleteShelf(id) {
   const sh = await dbGet('shelves', id);
@@ -1083,14 +1100,19 @@ async function uploadShelf(sh) {
     const folder = await shelfFolderFor(sh, shelvesFolder);
     sh.driveFolderId = folder.id;
     sh.driveFolderName = folder.name;
+    sh.fileIds = sh.fileIds || {};
     await dbPut('shelves', sh);
+    // The folder id is how this phone asks for its curator's requests about the
+    // shelf; it is kept even after the shelf's photos are deleted.
+    await addHeldId(folder.id, { kind: 'shelf', label: sh.label, localId: sh.id });
     let next = 0, failed = null, paused = false;
     const worker = async () => {
       while (next < photos.length && !failed && !paused) {
         if (!tokenFresh()) { paused = true; break; }
         const p = photos[next++];
         try {
-          await uploadFile(folder.id, pad2(p.n) + '.jpg', 'image/jpeg', p.blob);
+          const up = await uploadFile(folder.id, pad2(p.n) + '.jpg', 'image/jpeg', p.blob);
+          if (up && up.id) sh.fileIds[pad2(p.n) + '.jpg'] = up.id;
           await setUpload(sh, { done: sh.upload.done + 1 });
         } catch (e) { failed = e; }
       }
@@ -1194,7 +1216,210 @@ $('#btnUploadSignin').onclick = async () => {
 };
 // Resume on open and on every return to the foreground; without a fresh token
 // the pump marks the shelves paused and the home screen offers the sign-in.
-document.addEventListener('visibilitychange', () => { if (!document.hidden) pumpUploads(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { pumpUploads(); refreshRequests(); } });
+
+/* ---------- requests: what your curator wants photographed next ----------
+ * The phone names the Drive folder ids of the shelves it uploaded (kept in
+ * heldIds, even after a shelf's photos are deleted) and the request service
+ * answers the live requests for those shelves: author, title, where to find the
+ * book, what to photograph, and the spine's box on the shelf photo. A reply that
+ * is not JSON (Google's "unable to open the file" page) counts as no answer: the
+ * list on the phone stays as it was. The phone tells the service a request was
+ * seen; "received" is your curator's act, never the phone's. */
+const REQ_URL_RE = /^https:\/\/script\.google\.com\/macros\/s\/[-\w]+\/exec$/;
+const REQ_KEY_RE = /^[A-Za-z0-9_-]{25,100}$/;
+const REQ_RID_RE = /^R\d{4,6}-[A-HJ-NP-Z2-9]{4}$/;
+let reqLastTry = 0, reqBusy = false, reqObjUrl = null;
+function requestsUrl() { const u = cred('requestsUrl'); return REQ_URL_RE.test(u) ? u : ''; }
+async function heldIds() { return (await dbGet('kv', 'heldIds')) || {}; }
+async function addHeldId(id, info) {
+  if (!id || !REQ_KEY_RE.test(id)) return;
+  const h = await heldIds();
+  if (h[id]) return;
+  h[id] = { ...info, at: Date.now() };
+  await dbPut('kv', h, 'heldIds');
+}
+// Every uploaded shelf this phone holds, on every start; no network, no sign-in.
+async function seedHeldIds() {
+  const h = await heldIds();
+  let n = 0;
+  for (const sh of await dbAll('shelves')) {
+    if (sh.driveFolderId && REQ_KEY_RE.test(sh.driveFolderId) && !h[sh.driveFolderId]) {
+      h[sh.driveFolderId] = { kind: 'shelf', label: sh.label, localId: sh.id, at: Date.now() };
+      n++;
+    }
+  }
+  if (n) await dbPut('kv', h, 'heldIds');
+}
+// One call to the request service: a text/plain POST with no headers (no CORS
+// preflight). Anything but a JSON object is null: "no answer".
+async function requestsPost(body) {
+  const url = requestsUrl();
+  if (!url) return null;
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 20000);
+  try {
+    const r = await fetch(url, { method: 'POST', body: JSON.stringify(body), signal: ctl.signal });
+    const txt = await r.text();
+    try { const o = JSON.parse(txt); return o && typeof o === 'object' && !Array.isArray(o) ? o : null; } catch (e) { return null; }
+  } catch (e) { return null; } finally { clearTimeout(t); }
+}
+function reqItemOk(it) {
+  return !!it && typeof it.rid === 'string' && REQ_RID_RE.test(it.rid) && typeof it.key === 'string';
+}
+// At most once a minute unless asked (Check again). Up to 3 tries; the cached list
+// is replaced only by a good answer, and a shelf the service could not open keeps
+// its cached requests.
+async function refreshRequests({ force = false } = {}) {
+  if (!requestsUrl() || reqBusy) return;
+  if (!force && Date.now() - reqLastTry < 60000) return;
+  reqBusy = true;
+  reqLastTry = Date.now();
+  try {
+    const ids = Object.keys(await heldIds()).filter(id => REQ_KEY_RE.test(id));
+    const cached = (await dbGet('kv', 'requests')) || { items: [] };
+    if (!ids.length) { await dbPut('kv', { items: [], fetchedAt: Date.now(), build: '', lastError: '' }, 'requests'); return; }
+    let rep = null;
+    for (let a = 1; a <= 3; a++) {
+      rep = await requestsPost({ op: 'list', v: 1, ids });
+      if (rep && rep.ok === true && Array.isArray(rep.items)) break;
+      rep = null;
+      if (a < 3) await new Promise(r => setTimeout(r, 1500 * a));
+    }
+    if (!rep) { await dbPut('kv', { ...cached, lastError: 'Could not check just now' }, 'requests'); return; }
+    const unavailable = Array.isArray(rep.unavailable) ? rep.unavailable : [];
+    const fresh = rep.items.filter(reqItemOk);
+    const kept = (cached.items || []).filter(it => unavailable.indexOf(it.key) >= 0 && !fresh.some(x => x.rid === it.rid));
+    const items = fresh.concat(kept);
+    await dbPut('kv', { items, fetchedAt: Date.now(), build: String(rep.build || ''), lastError: '' }, 'requests');
+    await markSeen(ids, fresh);
+  } finally {
+    reqBusy = false;
+    renderReqCard();
+    if ($('#scr-requests').classList.contains('active')) openRequests();
+  }
+}
+// "Seen" once per request, recorded only when the service confirms it.
+async function markSeen(ids, items) {
+  const seen = (await dbGet('kv', 'requestsSeen')) || {};
+  const rids = items.map(i => i.rid).filter(r => !seen[r]).slice(0, 500);
+  if (!rids.length) return;
+  const rep = await requestsPost({ op: 'seen', v: 1, ids, rids });
+  if (!rep || rep.ok !== true) return;
+  for (const r of [].concat(rep.stamped || [], rep.already || [])) if (rids.indexOf(r) >= 0) seen[r] = Date.now();
+  await dbPut('kv', seen, 'requestsSeen');
+}
+function fmtTime(t) { return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+// A request's state on this phone, from the phone's own records only.
+function reqState(it, answered) {
+  const a = answered[it.rid];
+  if (a && a.uploaded) return { key: 'sent', text: 'Sent - waiting for your curator' };
+  if (a) return { key: 'shot', text: 'Photographed - waiting to upload' };
+  return { key: 'todo', text: 'To do' };
+}
+async function renderReqCard() {
+  const card = $('#reqCard');
+  if (!card) return;
+  if (!requestsUrl()) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  const c = (await dbGet('kv', 'requests')) || { items: [] };
+  const answered = (await dbGet('kv', 'answered')) || {};
+  const waiting = (c.items || []).filter(it => reqState(it, answered).key !== 'sent').length;
+  $('#reqCount').textContent = String(waiting);
+  $('#reqCount').classList.toggle('hidden', !waiting);
+  $('#reqSub').textContent = !c.fetchedAt ? (c.lastError ? 'Could not check just now' : 'Checking…')
+    : (c.lastError ? 'Could not check just now - showing the last list'
+      : (waiting ? waiting + ' waiting' : 'Nothing waiting') + ' · last checked ' + fmtTime(c.fetchedAt));
+}
+$('#reqCard').onclick = () => openRequests();
+async function openRequests() {
+  show('scr-requests', { title: 'Requests', back: goHome });
+  const c = (await dbGet('kv', 'requests')) || { items: [] };
+  const answered = (await dbGet('kv', 'answered')) || {};
+  const held = await heldIds();
+  const byFolder = {};
+  for (const s of await dbAll('shelves')) if (s.driveFolderId) byFolder[s.driveFolderId] = s;
+  $('#rqsStatus').textContent = !c.fetchedAt ? (c.lastError ? 'Could not check just now.' : 'Checking…')
+    : (c.lastError ? 'Could not check just now - showing the last list from ' + fmtTime(c.fetchedAt) + '.' : 'Last checked ' + fmtTime(c.fetchedAt) + '.');
+  const list = $('#rqsList');
+  list.innerHTML = '';
+  const items = (c.items || []).slice();
+  if (!items.length) { list.innerHTML = '<p class="empty">Nothing waiting.<br>Your curator\'s requests appear here.</p>'; return; }
+  // Grouped by shelf, in the order the shelves were shot; within a shelf by photo, then left to right.
+  const groupOf = it => byFolder[it.key] ? byFolder[it.key].label : held[it.key] ? held[it.key].label : (it.where || 'Other');
+  const orderOf = it => byFolder[it.key] ? byFolder[it.key].created : Infinity;
+  items.sort((a, b) => (orderOf(a) - orderOf(b)) || groupOf(a).localeCompare(groupOf(b)) ||
+    String(a.box && a.box.file || '').localeCompare(String(b.box && b.box.file || '')) || ((a.box ? a.box.x : 2) - (b.box ? b.box.x : 2)));
+  let cur = null;
+  for (const it of items) {
+    const g = groupOf(it);
+    if (g !== cur) { cur = g; const h = document.createElement('h2'); h.className = 'sect'; h.textContent = g; list.appendChild(h); }
+    const st = reqState(it, answered);
+    const row = document.createElement('button');
+    row.className = 'reqitem ' + st.key;
+    row.innerHTML = `<div class="rq-t">${esc(it.title || '(no title)')}</div><div class="rq-a">${esc(it.author || '')}</div>` +
+      `<div class="rq-w">${esc(it.where || '')}</div><div class="rq-s">${esc(st.text)}</div>`;
+    row.onclick = () => openRequest(it.rid);
+    list.appendChild(row);
+  }
+}
+$('#btnReqCheck').onclick = async () => { $('#rqsStatus').textContent = 'Checking…'; await refreshRequests({ force: true }); openRequests(); };
+function reqFreeUrl() { if (reqObjUrl) { URL.revokeObjectURL(reqObjUrl); reqObjUrl = null; } }
+// One request: the words, and the spine marked on this phone's own shelf photo
+// (never drawn on a photo retaken after the curator saw it).
+async function openRequest(rid) {
+  const c = (await dbGet('kv', 'requests')) || { items: [] };
+  const it = (c.items || []).find(x => x.rid === rid);
+  if (!it) return openRequests();
+  reqFreeUrl();
+  show('scr-request', { title: 'Request', back: () => { reqFreeUrl(); openRequests(); } });
+  $('#rqTitle').textContent = it.title || '';
+  $('#rqAuthor').textContent = it.author || '';
+  $('#rqWhere').textContent = it.where || '';
+  $('#rqAsked').textContent = it.asked || '';
+  const wrap = $('#rqPhoto'), note = $('#rqNote');
+  wrap.innerHTML = '';
+  note.textContent = '';
+  const box = it.box && typeof it.box === 'object' ? it.box : null;
+  let photo = null;
+  if (box && box.file) {
+    const sh = (await dbAll('shelves')).find(s => s.driveFolderId === it.key);
+    if (sh) photo = (await photosFor(sh.id)).find(p => pad2(p.n) + '.jpg' === box.file) || null;
+  }
+  if (!box) { note.textContent = 'Find the book by the words above.'; return; }
+  if (!photo) { note.textContent = 'This phone no longer holds that shelf photo. Find the book by the words above.'; return; }
+  const at = Date.parse(box.at || '');
+  if (!isFinite(at) || photo.when > at) { note.textContent = 'This shelf photo was retaken after your curator saw it. Find the book by the words above.'; return; }
+  reqObjUrl = URL.createObjectURL(photo.blob);
+  const pct = v => (Math.max(0, Math.min(1, Number(v) || 0)) * 100).toFixed(3) + '%';
+  wrap.innerHTML = `<div class="rq-frame"><img id="rqImg" alt="Shelf photo"><div class="rq-box" style="left:${pct(box.x)};top:${pct(box.y)};width:${pct(box.w)};height:${pct(box.h)}"></div></div>` +
+    '<p class="hint">The book is inside the box. Close up:</p><canvas id="rqZoom"></canvas>';
+  const img = $('#rqImg');
+  img.onload = () => {
+    // A close-up about five spine widths wide, so a thin spine's print can be read.
+    const W = img.naturalWidth, H = img.naturalHeight, bx = box.x * W, by = box.y * H, bw = box.w * W, bh = box.h * H;
+    const half = Math.max(bw * 2.5, W * 0.04), x0 = Math.max(0, bx + bw / 2 - half), x1 = Math.min(W, bx + bw / 2 + half);
+    const y0 = Math.max(0, by - 0.03 * H), y1 = Math.min(H, by + bh + 0.03 * H);
+    const cv = $('#rqZoom');
+    if (!cv) return;
+    const s = Math.min(1, 900 / (y1 - y0));
+    cv.width = Math.max(1, Math.round((x1 - x0) * s)); cv.height = Math.max(1, Math.round((y1 - y0) * s));
+    const g = cv.getContext('2d');
+    g.drawImage(img, x0, y0, x1 - x0, y1 - y0, 0, 0, cv.width, cv.height);
+    g.strokeStyle = '#d9a441'; g.lineWidth = Math.max(3, cv.width / 120);
+    g.strokeRect((bx - x0) * s, (by - y0) * s, bw * s, bh * s);
+  };
+  img.src = reqObjUrl;
+}
+$('#btnReqTest').onclick = async () => {
+  const u = ($('#inRequestsUrl').value.trim() || BUILTIN.requestsUrl || '').trim();
+  if (!REQ_URL_RE.test(u)) { $('#reqTestNote').textContent = 'That is not a request service address.'; return; }
+  $('#reqTestNote').textContent = 'Testing…';
+  try {
+    const r = await fetch(u + '?ping=1');
+    const o = JSON.parse(await r.text());
+    $('#reqTestNote').textContent = o && o.ok && o.ping ? 'Connected (build ' + o.build + ')' : 'No answer from that address';
+  } catch (e) { $('#reqTestNote').textContent = 'No answer from that address'; }
+};
 
 /* ---------- uploaded shelves ---------- */
 $('#btnArchive').onclick = () => openArchive();
@@ -1244,6 +1469,9 @@ function openSettings() {
   $('#builtinNote').classList.toggle('hidden', !BUILTIN.clientId);
   $('#inDriveFolder').value = settings.driveFolder || 'Books Curator';
   $('#inQuality').value = String(settings.quality || 0.95);
+  $('#inRequestsUrl').value = settings.requestsUrl || '';
+  $('#inRequestsUrl').placeholder = BUILTIN.requestsUrl || 'https://script.google.com/macros/s/…/exec';
+  $('#reqTestNote').textContent = '';
   renderLinkNote();
   show('scr-settings', { title: 'Settings', back: goHome });
 }
@@ -1301,6 +1529,10 @@ $('#btnSaveSettings').onclick = async () => {
   if (folder !== settings.driveFolder) { settings.driveFolderId = ''; rootCache = null; }
   settings.driveFolder = folder;
   settings.quality = Number($('#inQuality').value) || 0.95;
+  const rq = $('#inRequestsUrl').value.trim();
+  if (rq && !REQ_URL_RE.test(rq)) { toast('The request service address must be a script.google.com …/exec address', 4500); return; }
+  if (rq !== settings.requestsUrl) reqLastTry = 0;
+  settings.requestsUrl = rq;
   tokenInfo = tokenInfo.token && settings.clientId === cred('clientId') ? tokenInfo : { token: null, exp: 0 };
   await saveSettings();
   toast('Settings saved');
@@ -1308,10 +1540,21 @@ $('#btnSaveSettings').onclick = async () => {
 };
 $('#btnWipe').onclick = async () => {
   if (!confirm('Delete ALL shelves, photos, and settings stored by this app on this phone?')) return;
+  // Which shelves this phone uploaded is how it finds your curator's requests:
+  // kept unless you say otherwise. The client id is never cleared (BUILTIN wins).
+  const held = await heldIds(), answered = (await dbGet('kv', 'answered')) || {};
+  const forget = Object.keys(held).length > 0 && confirm('Also forget which shelves this phone uploaded? Your curator\'s requests for them will stop appearing.');
   await dbClear('photos');
   await dbClear('shelves');
+  await dbClear('books');
+  await dbClear('shots');
   await dbClear('kv');
-  Object.assign(settings, { clientId: '', apiKey: '', projectNumber: '', shareWith: '', operator: '', quality: 0.95, driveFolder: 'Books Curator', driveFolderId: '' });
+  if (!forget) {
+    if (Object.keys(held).length) await dbPut('kv', held, 'heldIds');
+    if (Object.keys(answered).length) await dbPut('kv', answered, 'answered');
+  }
+  Object.assign(settings, { clientId: '', apiKey: '', projectNumber: '', shareWith: '', operator: '', quality: 0.95, driveFolder: 'Books Curator', driveFolderId: '', requestsUrl: '' });
+  reqLastTry = 0;
   toast('All app data deleted');
   goHome();
 };
@@ -1407,6 +1650,7 @@ async function showVersion() {
   initServiceWorker();
   showVersion();
   maybeCoachIosInstall().catch(() => {});
+  await seedHeldIds();   // before the first requests check
   await goHome();
   pumpUploads();   // an interrupted queue: no token yet, so this marks it paused and shows the sign-in
 })();
