@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20260924-054833';
+const APP_VERSION = '20260924-145830';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -366,6 +366,10 @@ async function openBookCamera(shotId) {
   if (!curBook || !s) return goHome();
   if (curBook.upload && curBook.upload.state === 'uploading') return toast('Wait for the upload to finish');
   if ($('#scr-book').classList.contains('active')) await leaveBook();
+  // Capture minutes time the shooting: the clock starts when the camera opens on a
+  // book with no photo yet, not when the request was first opened (a request read
+  // at night and shot next morning once reported 504 minutes).
+  if (!(await shotsFor(curBook.id)).some(x => x.blob)) { curBook.startedAt = Date.now(); await dbPut('books', curBook); }
   capT = { kind: 'book', shot: shotId };
   freeGate();
   stopLevel();
