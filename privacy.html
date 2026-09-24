@@ -33,7 +33,7 @@ footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
 <body>
 
 <h1>Books Curator — Privacy Policy</h1>
-<p class="updated">Last updated 23 September 2026</p>
+<p class="updated">Last updated 24 September 2026</p>
 
 <p>Books Curator is a photography app for cataloguing books. It runs in your web
 browser on your own phone. There is no account to create, and no company collecting
@@ -45,7 +45,8 @@ anything about you.</p>
   request service (at script.google.com) which of your uploaded shelves have books to
   photograph. It sends only the Google Drive ids of folders the app created on your
   Drive (no photos, no names), and receives the author, title, where to find each book
-  and what to photograph.</p>
+  and what to photograph. It also tells the service which requests your phone has
+  received, and your curator's list records that date.</p>
 </div>
 
 <h2>What the app stores, and where</h2>
@@ -76,10 +77,19 @@ folder</strong> with a named email address, which is shown to you in the prompt.
 </ul>
 
 <h2>What the app sends over the internet</h2>
-<p>Only to Google, and only on your instruction:</p>
+<p>Only to Google:</p>
 <ul>
-  <li><code>accounts.google.com</code> — to sign you in to your own Google account</li>
-  <li><code>www.googleapis.com</code> — to upload your photographs to your own Drive</li>
+  <li><code>accounts.google.com</code> — to sign you in to your own Google account, when
+  you tap Upload</li>
+  <li><code>www.googleapis.com</code> — to upload your photographs to your own Drive, when
+  you tap Upload</li>
+  <li><code>script.google.com</code> — your curator's request service. Once you have
+  uploaded a shelf, the app asks it whether your curator would like any of your books
+  photographed: automatically, at most once a minute, when the app opens or comes back
+  to the screen. It sends only the Google Drive ids of the folders the app created on
+  your Drive, and tells the service which requests your phone has received (your
+  curator's list records that date). The answer comes back from
+  <code>script.googleusercontent.com</code>.</li>
 </ul>
 <p>The app uses no analytics, no advertising, no tracking, and no third-party
 services of any other kind. Voice dictation, if you use it, is provided by your
@@ -91,8 +101,10 @@ in the viewfinder. The readings are used on the spot and never stored or sent.</
 
 <h2>Deleting your data</h2>
 <p>Delete any shelf from the home screen, or everything the app holds from
-<strong>Settings → Delete ALL app data on this phone</strong>. Photographs already in
-your Google Drive are yours to keep or delete there.</p>
+<strong>Settings → Delete ALL app data on this phone</strong>. The app then asks whether
+to also forget which shelves this phone uploaded: unless you say yes, it keeps that
+list (the shelf labels and book titles) so your curator's requests keep appearing.
+Photographs already in your Google Drive are yours to keep or delete there.</p>
 
 <footer>Questions: pnicol66@gmail.com · <a href="terms.html">Terms of Use</a></footer>
 </body>

@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20260924-030637';
+const APP_VERSION = '20260924-051607';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -69,7 +69,9 @@ function openDB() {
     r.onblocked = () => toast('Close the other Books Curator tab, then reopen the app', 6000);
     r.onsuccess = () => {
       const d = r.result;
-      d.onversionchange = () => d.close();   // a newer version opening elsewhere: let it upgrade
+      // A newer version opening elsewhere: let it upgrade, and never keep using the
+      // closed connection (every later read would throw).
+      d.onversionchange = () => { d.close(); _db = null; toast('A newer version of the app is open - close this one and open it again', 6000); };
       res(d);
     };
     r.onerror = () => rej(r.error);
@@ -1106,7 +1108,7 @@ function uploadLabel(sh) {
   if (!u) return '';
   if (u.state === 'queued') return '⏳ Waiting to upload';
   if (u.state === 'uploading') return `☁ Uploading ${u.done}/${u.total}…`;
-  if (u.state === 'paused') return '⏸ Upload paused — sign in below to continue';
+  if (u.state === 'paused') return '⏸ Upload paused — sign in to continue';
   if (u.state === 'failed') return '⚠ Upload failed — ' + (u.error || 'tap ↻ to retry');
   return '';
 }
@@ -1547,6 +1549,9 @@ async function renderReqCard() {
 }
 $('#reqCard').onclick = () => openRequests();
 async function openRequests() {
+  // Two draws can overlap (Check again, and the refresh it triggers): only the latest
+  // one writes to the list, so nothing is drawn twice.
+  const token = openRequests.n = (openRequests.n || 0) + 1;
   show('scr-requests', { title: 'Requests', back: goHome });
   const c = (await dbGet('kv', 'requests')) || { items: [] };
   const answered = (await dbGet('kv', 'answered')) || {};
@@ -1556,6 +1561,7 @@ async function openRequests() {
   for (const s of await dbAll('shelves')) if (s.driveFolderId) byFolder[s.driveFolderId] = s;
   $('#rqsStatus').textContent = !c.fetchedAt ? (c.lastError ? 'Could not check just now.' : 'Checking…')
     : (c.lastError ? 'Could not check just now - showing the last list from ' + fmtTime(c.fetchedAt) + '.' : 'Last checked ' + fmtTime(c.fetchedAt) + '.');
+  if (token !== openRequests.n) return;
   const list = $('#rqsList');
   list.innerHTML = '';
   const items = (c.items || []).slice();
@@ -1592,7 +1598,8 @@ async function openRequests() {
       `<div class="rq-s">${esc(bk.upload ? uploadLabel(bk) : '')}</div>` +
       '<div class="row2" style="margin-top:10px"><button class="secondary st-up">☁ Upload</button><button class="secondary danger st-del">Delete</button></div>';
     const up = row.querySelector('.st-up');
-    up.disabled = uploadActive(bk) || !bookReady(await shotsFor(bk.id));
+    up.disabled = (uploadActive(bk) && bk.upload.state !== 'paused') || !bookReady(await shotsFor(bk.id));
+    if (token !== openRequests.n) return;   // a newer draw of this screen has started
     up.onclick = () => startBookUpload(bk, up);
     row.querySelector('.st-del').onclick = () => deleteBook(bk.id, () => openRequests());
     list.appendChild(row);
@@ -1745,9 +1752,12 @@ async function renderBook() {
   paintBookUpload(bk, bookReady(shots));
 }
 function paintBookUpload(bk, ready) {
-  const up = uploadActive(bk);
-  $('#btnBkUpload').disabled = !ready || up || !!bk.uploaded;
-  $('#btnBkUpload').textContent = up ? uploadLabel(bk) : bk.uploaded ? 'Sent - waiting for your curator' : '☁ Upload to Google Drive';
+  const up = uploadActive(bk), paused = !!(bk.upload && bk.upload.state === 'paused');
+  $('#btnBkUpload').disabled = !ready || (up && !paused) || !!bk.uploaded;
+  $('#btnBkUpload').textContent = paused ? '☁ Sign in to continue the upload' : up ? uploadLabel(bk) : bk.uploaded ? 'Sent - waiting for your curator' : '☁ Upload to Google Drive';
+  // While it is queued or going up, the words stay as they were sent: a note typed
+  // now would be overwritten by the upload's own copy of the record.
+  ['#inBkNote', '#inBkWords', '#btnBkNoteVoice', '#btnBkWordsVoice', '#btnBkDifferent'].forEach(q => { $(q).disabled = up && !paused; });
   $('#bkStatus').textContent = bk.upload && bk.upload.state === 'failed' ? uploadLabel(bk)
     : !ready ? 'Both photos are needed before this can be sent.' : '';
 }
@@ -1817,7 +1827,10 @@ $('#btnBkUpload').onclick = () => startBookUpload(curBook, $('#btnBkUpload'));
 // Sign in (a tap may open Google's sign-in), then queue. A book is never shared
 // on its own: it goes under the root that was shared when the shelves went up.
 async function startBookUpload(bk, btn) {
-  if (!bk || uploadActive(bk)) return;
+  if (!bk) return;
+  // A paused upload (the sign-in ran out) is continued from here as well as from home.
+  const paused = !!(bk.upload && bk.upload.state === 'paused');
+  if (uploadActive(bk) && !paused) return;
   btn.disabled = true;
   try {
     if (curBook && curBook.id === bk.id) await leaveBook();
@@ -1825,7 +1838,8 @@ async function startBookUpload(bk, btn) {
     if (!cred('clientId')) throw new Error('This build has no Google Client ID yet — add one in ⚙ Settings');
     btn.textContent = 'Signing in to Google…';
     await getToken();
-    await queueBook(bk);
+    if (paused) await setUpload(bk, { state: 'queued', error: '' });
+    else await queueBook(bk);
     toast('Queued — uploading while you carry on', 3000);
     openRequests();
     pumpUploads();
@@ -2079,4 +2093,7 @@ async function showVersion() {
   await seedHeldIds();   // before the first requests check
   await goHome();
   pumpUploads();   // an interrupted queue: no token yet, so this marks it paused and shows the sign-in
-})();
+})().catch(e => {
+  console.error(e);
+  toast('The app could not open its saved photos - close it and open it again, or tell your curator', 8000);
+});

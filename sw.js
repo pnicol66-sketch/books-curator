@@ -1,5 +1,5 @@
 'use strict';
-const CACHE = 'bookcurator-20260924-030637';
+const CACHE = 'bookcurator-20260924-051607';
 const ASSETS = [
   './', './index.html', './app.js', './manifest.webmanifest',
   './icon.svg', './icon-192.png', './icon-512.png', './icon-512-maskable.png',
@@ -9,7 +9,9 @@ const ASSETS = [
 self.addEventListener('install', e => {
   // No skipWaiting here: taking over mid-session leaves the open page running
   // the previous app.js against fresh assets. Wait until the user taps Update.
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
+  // cache: 'reload' goes past the browser's HTTP cache (Pages marks files fresh for
+  // ten minutes), so a new build never stores the old files under its new name.
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))));
 });
 
 self.addEventListener('message', e => {
