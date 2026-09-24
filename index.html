@@ -248,6 +248,23 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
 .rq-frame img { width: 100%; display: block; }
 .rq-box { position: absolute; border: 3px solid var(--accent); border-radius: 3px; box-shadow: 0 0 0 9999px rgba(0,0,0,.55); }
 #rqZoom { display: block; max-width: 100%; margin: 8px auto 0; border-radius: 10px; background: #000; }
+.reqitem.started .rq-s { color: #e0b04a; }
+/* a book asked for */
+.bk-q { color: var(--dim); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+#bkTitle { font-size: 19px; font-weight: 700; margin: 4px 0 0; }
+#bkAuthor { font-size: 15px; margin: 3px 0 0; }
+#bkWhere { color: var(--dim); font-size: 13.5px; margin: 10px 0 0; }
+#bkAsked { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 12px 0 0; font-size: 15px; line-height: 1.4; }
+.linkbtn { border: 0; background: none; color: var(--accent); font-size: 14.5px; padding: 12px 0 0; text-decoration: underline; }
+.bkshot { display: flex; gap: 12px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px; margin-bottom: 10px; }
+.bk-view { border: 0; padding: 0; background: none; flex: none; }
+.bk-thumb { display: flex; align-items: center; justify-content: center; width: 76px; height: 76px; object-fit: cover; border-radius: 10px; background: #26262c; font-size: 26px; }
+.bk-body { flex: 1; min-width: 0; }
+.bk-name { font-size: 14.5px; line-height: 1.35; }
+.bk-req { color: var(--accent); font-size: 12px; }
+.bkshot.got .bk-req { color: var(--ok); }
+.bk-take { margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--card2); padding: 9px 12px; font-size: 14.5px; font-weight: 600; }
+#bkStatus { color: #e0b04a; font-size: 13.5px; min-height: 18px; margin: 12px 0 8px; }
 /* toast */
 #toast {
   position: fixed; left: 50%; bottom: calc(30px + env(safe-area-inset-bottom)); transform: translateX(-50%);
@@ -396,6 +413,34 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
   <div id="rqAsked"></div>
   <div id="rqNote"></div>
   <div id="rqPhoto"></div>
+  <div class="stack" style="margin-top:16px">
+    <button id="btnRqShoot" class="primary">Photograph this book</button>
+  </div>
+</section>
+
+<section id="scr-book">
+  <div class="bk-q">Is this the book?</div>
+  <div id="bkTitle"></div>
+  <div id="bkAuthor"></div>
+  <div id="bkWhere"></div>
+  <div id="bkAsked"></div>
+  <button id="btnBkDifferent" class="linkbtn">It's a different book</button>
+  <div id="bkNoteWrap" class="hidden">
+    <label class="field" for="inBkNote">Note for your curator (optional)</label>
+    <textarea id="inBkNote" autocomplete="off" autocapitalize="sentences"></textarea>
+    <button id="btnBkNoteVoice" class="secondary voicebtn hidden" data-idle="🎤 Dictate">🎤 Dictate</button>
+  </div>
+  <h2 class="sect">Photos <span class="lbl-opt">— ● both needed</span></h2>
+  <div id="bkShots"></div>
+  <label class="field" for="inBkWords">13 Copyright page words <span class="lbl-opt">(optional)</span></label>
+  <textarea id="inBkWords" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. First Edition&#10;10 9 8 7 6 5 4 3 2 1"></textarea>
+  <button id="btnBkWordsVoice" class="secondary voicebtn hidden" data-idle="🎤 Dictate">🎤 Dictate</button>
+  <p class="voicehint">Type or say what the page says, line by line. Numbers said as words become digits ("ten nine eight" gives 10 9 8, "nineteen sixty three" gives 1963). Say <b>new line</b> for a new line and <b>copyright sign</b> for ©.</p>
+  <div id="bkStatus"></div>
+  <div class="stack">
+    <button id="btnBkUpload" class="primary">☁ Upload to Google Drive</button>
+    <button id="btnBkDelete" class="secondary danger">Delete this book from the phone</button>
+  </div>
 </section>
 
 <section id="scr-settings">

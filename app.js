@@ -1,19 +1,22 @@
 'use strict';
 
-/* Books Curator — phone capture app, Shelf mode.
+/* Books Curator — phone capture app, Shelf mode and request answers.
  *
  * A separate project from Vinyl Curator; the machinery that is proven there
  * (IndexedDB store, camera, background Drive upload queue, folder sharing,
  * update bar, dictation) is copied in with the same function names so a diff
- * between the two apps stays readable. The vinyl domain (shot table, crop,
- * matrix dictation) is not here. This slice records SHELVES only: one labelled
- * photo (or a few overlapping frames) per shelf, checked for legibility,
- * uploaded to the client's own Drive under Books Curator/_Shelves/<label>/.
+ * between the two apps stays readable. The vinyl domain (crop, matrix
+ * dictation) is not here. Shelves: one labelled photo (or a few overlapping
+ * frames) per shelf, checked for legibility, uploaded to the client's own Drive
+ * under Books Curator/_Shelves/<label>/. Request answers: the curator asks for
+ * one book off a shelf; the phone takes its jacket front and copyright page and
+ * files them in a folder of their own beside _Shelves, found from the shelf's
+ * folder by id, never by name.
  */
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20260924-023351';
+const APP_VERSION = '20260924-030637';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -34,6 +37,17 @@ function pad2(n) { return String(n).padStart(2, '0'); }
 const CHIPS = ['Second row behind', 'Books stacked flat on top', 'Top shelf, shot from below', 'Glass door'];
 const SHELVES_FOLDER = '_Shelves';   // sorts first, can never collide with an Author_Title folder
 const CAM_TIP = '📸 Card at the left end · phone sideways · square to the shelf · fill the width';
+const SHELF_GATE = 'Drag the loupe over the smallest spine. Can you read it?';
+/* A book asked for by the curator: two photos, both required, and the copyright
+   page's words, optional. The numbers are the shot numbers the sheet files by. */
+const BOOK_SHOTS = [
+  { id: '01', name: 'Jacket Front', label: 'Front of the jacket (or the cover if there is no jacket)',
+    tip: '📸 The whole front, square on · flash off', gate: 'Drag the loupe over the title. Can you read it?' },
+  { id: '12', name: 'Copyright Page', label: 'Copyright page: open the book flat at it, the whole page, square on',
+    tip: '📸 Open the book flat at the copyright page · the whole page, square on · flash off',
+    gate: 'Drag the loupe over the smallest print. Can you read it?' },
+];
+const BOOK_WORDS = { id: '13', name: 'Copyright Verbatim' };
 
 /* ---------- IndexedDB ---------- */
 let _db = null;
@@ -77,6 +91,11 @@ async function photosFor(shelfId) {
   const all = await reqP((await db()).transaction('photos').objectStore('photos')
     .getAll(IDBKeyRange.bound([shelfId, 0], [shelfId, 999])));
   return all.sort((a, b) => a.n - b.n);
+}
+async function shotsFor(bookId) {
+  const all = await reqP((await db()).transaction('shots').objectStore('shots')
+    .getAll(IDBKeyRange.bound([bookId, '00'], [bookId, '99'])));
+  return all.sort((a, b) => a.shotId.localeCompare(b.shotId));
 }
 
 /* ---------- built-in Google credentials ----------
@@ -318,7 +337,12 @@ async function finishShelf(sh) {
 
 /* ---------- camera ---------- */
 let stream = null, track = null, imageCapture = null, curFrame = null;   // curFrame: frame number being re-shot, else null
+// What the camera, the gate and the viewer are working on: a shelf frame
+// (curShelf, curFrame) or a book shot (curBook, capT.shot).
+let capT = { kind: 'shelf' };
+function capBack() { return capT.kind === 'book' ? openBookCamera(capT.shot) : openCamera(curFrame); }
 async function openCamera(frameNo) {
+  capT = { kind: 'shelf' };
   curFrame = frameNo || null;
   freeGate();
   const photos = await photosFor(curShelf.id);
@@ -331,6 +355,22 @@ async function openCamera(frameNo) {
   $('#camFallback').classList.add('hidden');
   await startCam();
   startLevel();   // after the tap: iOS only grants motion access from a user gesture
+}
+// A book shot: no level line (a page shot flat reads a pitch near 90 degrees);
+// the loupe gate stays, it is the right check for a number line.
+async function openBookCamera(shotId) {
+  const s = BOOK_SHOTS.find(x => x.id === shotId);
+  if (!curBook || !s) return goHome();
+  if (curBook.upload && curBook.upload.state === 'uploading') return toast('Wait for the upload to finish');
+  if ($('#scr-book').classList.contains('active')) await leaveBook();
+  capT = { kind: 'book', shot: shotId };
+  freeGate();
+  stopLevel();
+  show('scr-camera', { title: curBook.title || 'Book', back: backToBook });
+  $('#camLabel').textContent = `${s.id} ${s.name}`;
+  $('#camTip').textContent = s.tip;
+  $('#camFallback').classList.add('hidden');
+  await startCam();
 }
 async function startCam() {
   stopCam();
@@ -523,7 +563,9 @@ function openGate(bmp) {
   freeGate();
   gate.bmp = bmp;
   gate.loupe = { x: bmp.width / 2, y: bmp.height / 2 };
-  show('scr-gate', { title: 'Can you read it?', back: () => openCamera(curFrame) });
+  const s = capT.kind === 'book' ? BOOK_SHOTS.find(x => x.id === capT.shot) : null;
+  $('#gatePrompt').textContent = s ? s.gate : SHELF_GATE;
+  show('scr-gate', { title: 'Can you read it?', back: capBack });
   layoutGate();
 }
 function layoutGate() {
@@ -602,11 +644,18 @@ gc.addEventListener('pointermove', e => {
 gc.addEventListener('pointerup', () => { gate.drag = false; });
 gc.addEventListener('pointercancel', () => { gate.drag = false; });
 window.addEventListener('resize', () => { if ($('#scr-gate').classList.contains('active')) layoutGate(); });
-$('#btnReshoot').onclick = () => openCamera(curFrame);
+$('#btnReshoot').onclick = () => capBack();
 $('#btnKeep').onclick = keepFrame;
 // Full resolution, no crop, no level: the frame is re-encoded from the
 // oriented bitmap so the file needs no EXIF rotation to read right, and at
 // the highest quality the client chose. A spine's publisher line is 10 px tall.
+function gateJpeg(bmp) {
+  const c = document.createElement('canvas');
+  c.width = bmp.width; c.height = bmp.height;
+  c.getContext('2d').drawImage(bmp, 0, 0);
+  return new Promise((res, rej) =>
+    c.toBlob(b => b ? res(b) : rej(new Error('JPEG encode failed')), 'image/jpeg', settings.quality || 0.95));
+}
 async function keepFrame() {
   if (!gate.bmp) return;
   const btn = $('#btnKeep');
@@ -615,11 +664,8 @@ async function keepFrame() {
   await new Promise(r => setTimeout(r, 40));
   try {
     const bmp = gate.bmp;
-    const c = document.createElement('canvas');
-    c.width = bmp.width; c.height = bmp.height;
-    c.getContext('2d').drawImage(bmp, 0, 0);
-    const blob = await new Promise((res, rej) =>
-      c.toBlob(b => b ? res(b) : rej(new Error('JPEG encode failed')), 'image/jpeg', settings.quality || 0.95));
+    const blob = await gateJpeg(bmp);
+    if (capT.kind === 'book') return await keepBookShot(capT.shot, bmp, blob);
     const photos = await photosFor(curShelf.id);
     const n = curFrame || (photos.length ? photos[photos.length - 1].n + 1 : 1);
     await dbPut('photos', { shelfId: curShelf.id, n, blob, w: bmp.width, h: bmp.height, when: Date.now() });
@@ -638,16 +684,33 @@ async function keepFrame() {
 
 /* ---------- viewer ---------- */
 let viewPhoto = null, viewerUrl = null;
+// A shelf frame {shelfId, n, ...} or a book shot {bookId, shotId, ...}.
 function openViewer(p) {
   viewPhoto = p;
   if (viewerUrl) URL.revokeObjectURL(viewerUrl);
   viewerUrl = URL.createObjectURL(p.blob);
   $('#viewerImg').src = viewerUrl;
+  if (p.shotId) {
+    const s = BOOK_SHOTS.find(x => x.id === p.shotId) || { name: '' };
+    $('#viewerName').textContent = `${curBook.title} · ${p.shotId} ${s.name} · ${p.w}×${p.h}`;
+    $('#btnVRetake').textContent = 'Re-shoot this photo';
+    $('#btnVDelete').textContent = 'Delete this photo';
+    show('scr-viewer', { title: `${p.shotId} ${s.name}`, back: backToBook });
+    return;
+  }
   $('#viewerName').textContent = `${curShelf.label} · frame ${p.n} · ${p.w}×${p.h}`;
+  $('#btnVRetake').textContent = 'Re-shoot this frame';
+  $('#btnVDelete').textContent = 'Delete this frame';
   show('scr-viewer', { title: `Frame ${p.n}`, back: backToShelf });
 }
-$('#btnVRetake').onclick = () => openCamera(viewPhoto.n);
+$('#btnVRetake').onclick = () => viewPhoto.shotId ? openBookCamera(viewPhoto.shotId) : openCamera(viewPhoto.n);
 $('#btnVDelete').onclick = async () => {
+  if (viewPhoto.shotId) {
+    if (!confirm('Delete this photo?')) return;
+    await dbDel('shots', [curBook.id, viewPhoto.shotId]);
+    await bookChanged(curBook);
+    return backToBook();
+  }
   if (!confirm('Delete this frame?')) return;
   await dbDel('photos', [curShelf.id, viewPhoto.n]);
   backToShelf();
@@ -663,6 +726,34 @@ function voiceToText(s) {
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
 }
 function voiceToNote(s) { return String(s).replace(/\s+/g, ' ').trim(); }
+// The copyright page's words, read aloud: a number line is said "ten nine eight
+// ... one" and must come out "10 9 8 ... 1", one number per word, never run
+// together; a year said "nineteen sixty three" is 1963, and "thirty one" is 31.
+// "new line" breaks the line; "copyright sign" is the symbol.
+const VERB_ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+const VERB_TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+const VERB_W1 = '(one|two|three|four|five|six|seven|eight|nine)';
+const VERB_WTENS = '(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)';
+const VERB_YEAR_RE = new RegExp('\\b(ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)[ -]' +
+  '(?:(oh)[ -]' + VERB_W1 + '|' + VERB_WTENS + '(?:[ -]' + VERB_W1 + ')?|(hundred))\\b', 'gi');
+const VERB_TENS_RE = new RegExp('\\b' + VERB_WTENS + '[ -]' + VERB_W1 + '\\b', 'gi');
+const VERB_ONE_RE = new RegExp('\\b(' + VERB_ONES.concat(VERB_TENS.filter(Boolean)).join('|') + ')\\b', 'gi');
+function verbVal(w) { w = String(w).toLowerCase(); const i = VERB_ONES.indexOf(w); return i >= 0 ? i : VERB_TENS.indexOf(w) * 10; }
+function voiceToVerbatim(s) {
+  return String(s)
+    .replace(/\b(new line|newline|next line)\b/gi, '\n')
+    .replace(/\bcopyright (sign|symbol)\b/gi, '©')
+    .replace(VERB_YEAR_RE, (m, pre, oh, ohUnit, tens, unit, hundred) =>
+      String(verbVal(pre) * 100 + (oh ? verbVal(ohUnit) : hundred ? 0 : verbVal(tens) + (unit ? verbVal(unit) : 0))))
+    .replace(VERB_TENS_RE, (m, t, u) => String(verbVal(t) + verbVal(u)))
+    .replace(VERB_ONE_RE, w => String(verbVal(w)))
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/^ | $/g, '');
+}
+// Tidy what dictation joined with spaces around its line breaks.
+function tidyVerbatim(s) { return String(s || '').replace(/[ \t]*\n[ \t]*/g, '\n').replace(/[ \t]+/g, ' ').trim(); }
 let voiceMap = voiceToText;         // active mapper — set per field when dictation starts
 let voiceFieldSel = '#inLabel';     // the input/textarea dictation fills
 let voiceBtnSel = '#btnLabelVoice'; // the button whose label reflects dictation state
@@ -1024,15 +1115,18 @@ function uploadLabel(sh) {
 function tokenFresh() {
   return !!(tokenInfo.token && Date.now() < tokenInfo.exp - 120000);
 }
+// The queue holds shelves and request books alike; a record says which it is.
+function storeOf(r) { return r && r.kind === 'book' ? 'books' : 'shelves'; }
 async function uploadQueue() {
-  return (await dbAll('shelves'))
+  return [...await dbAll('shelves'), ...await dbAll('books')]
     .filter(s => s.upload && /^(queued|uploading|paused)$/.test(s.upload.state))
     .sort((a, b) => (a.upload.queued || 0) - (b.upload.queued || 0));
 }
 async function setUpload(sh, patch) {
   Object.assign(sh.upload, patch);
-  await dbPut('shelves', sh);
-  if (curShelf && curShelf.id === sh.id) curShelf.upload = sh.upload;
+  await dbPut(storeOf(sh), sh);
+  if (storeOf(sh) === 'shelves' && curShelf && curShelf.id === sh.id) curShelf.upload = sh.upload;
+  if (storeOf(sh) === 'books' && curBook && curBook.id === sh.id) curBook.upload = sh.upload;
   refreshUploadCards();
 }
 async function queueShelf(sh) {
@@ -1070,7 +1164,7 @@ async function pumpUploads() {
         break;
       }
       const sh = queue[0];
-      await uploadShelf(sh);
+      await (sh.kind === 'book' ? uploadBook(sh) : uploadShelf(sh));
       if (sh.upload && sh.upload.state === 'paused') break;
     }
   } finally {
@@ -1136,6 +1230,121 @@ async function uploadShelf(sh) {
     await setUpload(sh, { state: 'failed', error: msg.slice(0, 120) });
   }
 }
+
+/* A request's book goes into the root its shelf went into, found from the
+ * shelf's own folder BY ID: <shelf folder> -> _Shelves -> the root. The app
+ * made (or was given) all three, so drive.file can read them. Never the folder
+ * named in Settings and never a search by name: a phone that lost its settings,
+ * or a second phone, still files the answer where the curator reads. */
+const DRIVE_FILES = 'https://www.googleapis.com/drive/v3/files/';
+const SHELF_GONE = 'The shelf this request belongs to is no longer in your Google Drive - tell your curator';
+async function requestRootFolder(key) {
+  const get = async (id, fields) => {
+    try { return await drive(DRIVE_FILES + encodeURIComponent(id) + '?fields=' + fields); }
+    catch (e) { if (/Drive error (403|404)/.test(String(e.message))) throw new Error(SHELF_GONE); throw e; }
+  };
+  if (!REQ_KEY_RE.test(String(key || ''))) throw new Error(SHELF_GONE);
+  const sf = await get(key, 'id,parents,trashed');
+  if (!sf || sf.trashed || !Array.isArray(sf.parents) || sf.parents.length !== 1) throw new Error(SHELF_GONE);
+  const sv = await get(sf.parents[0], 'id,name,parents,trashed');
+  if (!sv || sv.trashed || sv.name !== SHELVES_FOLDER || !Array.isArray(sv.parents) || sv.parents.length !== 1) throw new Error(SHELF_GONE);
+  const root = await get(sv.parents[0], 'id,name,trashed');
+  if (!root || !root.id || root.trashed) throw new Error(SHELF_GONE);
+  return { id: root.id, name: root.name };
+}
+function bookFileBase(bk) { return `${sanitize(bk.author || '') || 'Unknown'} - ${sanitize(bk.title || '') || 'Untitled'}`; }
+function bookFolderName(bk) { return `${sanitize(bk.author || '') || 'Unknown'}_${sanitize(bk.title || '') || 'Untitled'}`; }
+// The request's own folder while it is alive (from the record, or from answered
+// when the record was made again); otherwise a new Author_Title folder in the
+// root, " (2)" on a clash, never merged into another book's folder.
+async function bookFolderFor(bk, rootId) {
+  const known = bk.driveFolderId || ((await answeredMap())[bk.requestId] || {}).driveFolderId || '';
+  if (known) {
+    try {
+      const f = await drive(DRIVE_FILES + encodeURIComponent(known) + '?fields=id,name,trashed');
+      if (f && f.id && !f.trashed) return { id: f.id, name: f.name };
+    } catch (e) { if (!/Drive error (403|404)/.test(String(e.message))) throw e; }
+  }
+  const base = bookFolderName(bk);
+  let name = base;
+  for (let n = 2; n < 100 && await findFolder(name, rootId); n++) name = `${base} (${n})`;
+  return { id: await findOrCreateFolder(name, rootId), name };
+}
+async function uploadBook(bk) {
+  try {
+    const shots = await shotsFor(bk.id);
+    if (!bookReady(shots)) throw new Error('Both photos are needed first');
+    const base = bookFileBase(bk);
+    const files = BOOK_SHOTS.map(s => {
+      const x = shots.find(y => y.shotId === s.id);
+      return { shot: s.id, name: `${base} - ${s.id} ${s.name}.jpg`, mime: 'image/jpeg', blob: x.blob, w: x.w, h: x.h };
+    });
+    const words = shots.find(y => y.shotId === BOOK_WORDS.id && y.text);
+    if (words) files.push({ shot: BOOK_WORDS.id, name: `${base} - ${BOOK_WORDS.id} ${BOOK_WORDS.name}.txt`, mime: 'text/plain',
+      blob: new Blob([words.text], { type: 'text/plain' }), text: true });
+    await setUpload(bk, { state: 'uploading', done: 0, total: files.length + 1, error: '' });
+    const root = await requestRootFolder(bk.shelfRef && bk.shelfRef.shelfFolderId);
+    const folder = await bookFolderFor(bk, root.id);
+    // From here the folder IS this request's answer: kept before the first file,
+    // so a retry, or a record made again, goes back into it.
+    bk.driveFolderId = folder.id;
+    bk.driveFolderName = folder.name;
+    bk.fileIds = bk.fileIds || {};
+    await dbPut('books', bk);
+    await setAnswered(bk.requestId, { bookId: bk.id, driveFolderId: folder.id });
+    for (const f of files) {
+      if (!tokenFresh()) { await setUpload(bk, { state: 'paused' }); return; }
+      const up = await uploadFile(folder.id, f.name, f.mime, f.blob);
+      if (up && up.id) bk.fileIds[f.name] = up.id;
+      await setUpload(bk, { done: bk.upload.done + 1 });
+    }
+    await writeBookManifest(folder.id, bk, files);
+    await setUpload(bk, { done: files.length + 1 });
+    bk.uploaded = Date.now();
+    delete bk.upload;
+    await dbPut('books', bk);
+    if (curBook && curBook.id === bk.id) curBook = bk;
+    await setAnswered(bk.requestId, { uploaded: bk.uploaded });
+    // The book's own folder: how the phone will ask about it at full capture.
+    await addHeldId(folder.id, { kind: 'book', label: bk.title, localId: bk.id });
+    toast(`Sent “${bk.title}” ✓`, 3600);
+    renderReqCard();
+    if ($('#scr-requests').classList.contains('active')) openRequests();
+    if ($('#scr-book').classList.contains('active') && curBook && curBook.id === bk.id) renderBook();
+  } catch (e) {
+    console.error('upload', bk.id, e);
+    const msg = String(e && e.message || e);
+    if (/sign-in|token|401/i.test(msg)) { await setUpload(bk, { state: 'paused' }); return; }
+    await setUpload(bk, { state: 'failed', error: msg.slice(0, 120) });
+  }
+}
+// book.json, written LAST: the importer reads it, never the folder name.
+async function writeBookManifest(folder, bk, files) {
+  const started = bk.startedAt || bk.created, finished = bk.finishedAt || Date.now();
+  const r = bk.shelfRef || {};
+  const manifest = {
+    bookCurator: 1,
+    kind: 'book',
+    template: 'spot',
+    appBookId: bk.id,
+    author: bk.author || '',
+    title: bk.title || '',
+    requestId: bk.requestId || '',
+    requestBookId: bk.requestBookId || '',
+    shelfRef: { shelfId: r.shelfId || '', shelfFolderId: r.shelfFolderId || '', file: r.file || '', box: r.box || null, where: r.where || '' },
+    note: bk.note || '',
+    photos: files.filter(f => !f.text).map(f => ({ shot: f.shot, file: f.name, w: f.w, h: f.h, required: true })),
+    texts: files.filter(f => f.text).map(f => ({ shot: f.shot, file: f.name })),
+    operator: bk.operator || settings.operator || '',
+    startedAt: new Date(started).toISOString(),
+    finishedAt: new Date(finished).toISOString(),
+    captureMinutes: Math.round((finished - started) / 6000) / 10,
+    app: APP_VERSION,
+    updated: new Date().toISOString(),
+  };
+  const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
+  await uploadFile(folder, 'book.json', 'application/json', blob);
+}
 // Repaint the status line on every home card that carries an upload record,
 // without rebuilding the list.
 function refreshUploadCards() {
@@ -1144,9 +1353,13 @@ function refreshUploadCards() {
     $('#btnUpload').disabled = up || $('#btnNext').disabled;
     $('#btnUpload').textContent = up ? uploadLabel(curShelf) : '☁ Upload to Google Drive';
   }
+  if ($('#scr-book').classList.contains('active') && curBook) {
+    const bk = curBook;
+    shotsFor(bk.id).then(shots => { if (curBook === bk) paintBookUpload(bk, bookReady(shots)); });
+  }
   if (!$('#scr-home').classList.contains('active')) return;
   (async () => {
-    const shelves = await dbAll('shelves');
+    const shelves = await dbAll('shelves'), books = await dbAll('books');
     const byId = Object.fromEntries(shelves.map(s => [s.id, s]));
     $$('#shelfList .shelfcard[data-shelf]').forEach(card => {
       const sh = byId[card.dataset.shelf];
@@ -1159,7 +1372,7 @@ function refreshUploadCards() {
       card.querySelector('.sh-del').classList.toggle('hidden', !!(sh.upload && sh.upload.state === 'uploading'));
       card.querySelector('.sh-retry').classList.toggle('hidden', !(sh.upload && sh.upload.state === 'failed'));
     });
-    const waiting = shelves.filter(s => s.upload && s.upload.state === 'paused').length;
+    const waiting = shelves.concat(books).filter(s => s.upload && s.upload.state === 'paused').length;
     const btn = $('#btnUploadSignin');
     btn.classList.toggle('hidden', !waiting);
     btn.textContent = `Sign in to continue ${waiting} upload${waiting === 1 ? '' : 's'}`;
@@ -1310,10 +1523,12 @@ async function markSeen(ids, items) {
 }
 function fmtTime(t) { return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
 // A request's state on this phone, from the phone's own records only.
-function reqState(it, answered) {
+function reqState(it, answered, books = {}) {
   const a = answered[it.rid];
   if (a && a.uploaded) return { key: 'sent', text: 'Sent - waiting for your curator' };
-  if (a) return { key: 'shot', text: 'Photographed - waiting to upload' };
+  const bk = a && a.bookId ? books[a.bookId] : null;
+  if (bk && bk.upload) return { key: 'shot', text: uploadLabel(bk) };
+  if (a && a.ready) return { key: 'shot', text: 'Photographed - waiting to upload' };
   return { key: 'todo', text: 'To do' };
 }
 async function renderReqCard() {
@@ -1336,6 +1551,7 @@ async function openRequests() {
   const c = (await dbGet('kv', 'requests')) || { items: [] };
   const answered = (await dbGet('kv', 'answered')) || {};
   const held = await heldIds();
+  const allBooks = await dbAll('books'), books = Object.fromEntries(allBooks.map(b => [b.id, b]));
   const byFolder = {};
   for (const s of await dbAll('shelves')) if (s.driveFolderId) byFolder[s.driveFolderId] = s;
   $('#rqsStatus').textContent = !c.fetchedAt ? (c.lastError ? 'Could not check just now.' : 'Checking…')
@@ -1343,7 +1559,10 @@ async function openRequests() {
   const list = $('#rqsList');
   list.innerHTML = '';
   const items = (c.items || []).slice();
-  if (!items.length) { list.innerHTML = '<p class="empty">Nothing waiting.<br>Your curator\'s requests appear here.</p>'; return; }
+  // Books started here whose request the list no longer returns (withdrawn before
+  // they went up): kept, with Upload and Delete, so no photo is stranded.
+  const started = allBooks.filter(b => !b.uploaded && !items.some(it => it.rid === b.requestId)).sort((a, b) => a.created - b.created);
+  if (!items.length) list.innerHTML = '<p class="empty">Nothing waiting.<br>Your curator\'s requests appear here.</p>';
   // Grouped by shelf, in the order the shelves were shot; within a shelf by photo, then left to right.
   const groupOf = it => byFolder[it.key] ? byFolder[it.key].label : held[it.key] ? held[it.key].label : (it.where || 'Other');
   const orderOf = it => byFolder[it.key] ? byFolder[it.key].created : Infinity;
@@ -1353,12 +1572,29 @@ async function openRequests() {
   for (const it of items) {
     const g = groupOf(it);
     if (g !== cur) { cur = g; const h = document.createElement('h2'); h.className = 'sect'; h.textContent = g; list.appendChild(h); }
-    const st = reqState(it, answered);
+    const st = reqState(it, answered, books);
     const row = document.createElement('button');
     row.className = 'reqitem ' + st.key;
+    row.dataset.rid = it.rid;
     row.innerHTML = `<div class="rq-t">${esc(it.title || '(no title)')}</div><div class="rq-a">${esc(it.author || '')}</div>` +
       `<div class="rq-w">${esc(it.where || '')}</div><div class="rq-s">${esc(st.text)}</div>`;
     row.onclick = () => openRequest(it.rid);
+    list.appendChild(row);
+  }
+  if (!started.length) return;
+  const h = document.createElement('h2'); h.className = 'sect'; h.textContent = 'Started on this phone';
+  list.appendChild(h);
+  for (const bk of started) {
+    const row = document.createElement('div');
+    row.className = 'reqitem started';
+    row.dataset.book = bk.id;
+    row.innerHTML = `<div class="rq-t">${esc(bk.title || '(no title)')}</div><div class="rq-a">${esc(bk.author || '')}</div>` +
+      `<div class="rq-s">${esc(bk.upload ? uploadLabel(bk) : '')}</div>` +
+      '<div class="row2" style="margin-top:10px"><button class="secondary st-up">☁ Upload</button><button class="secondary danger st-del">Delete</button></div>';
+    const up = row.querySelector('.st-up');
+    up.disabled = uploadActive(bk) || !bookReady(await shotsFor(bk.id));
+    up.onclick = () => startBookUpload(bk, up);
+    row.querySelector('.st-del').onclick = () => deleteBook(bk.id, () => openRequests());
     list.appendChild(row);
   }
 }
@@ -1372,6 +1608,7 @@ async function openRequest(rid) {
   if (!it) return openRequests();
   reqFreeUrl();
   show('scr-request', { title: 'Request', back: () => { reqFreeUrl(); openRequests(); } });
+  $('#btnRqShoot').onclick = () => openBookFromRequest(rid);
   $('#rqTitle').textContent = it.title || '';
   $('#rqAuthor').textContent = it.author || '';
   $('#rqWhere').textContent = it.where || '';
@@ -1420,6 +1657,195 @@ $('#btnReqTest').onclick = async () => {
     $('#reqTestNote').textContent = o && o.ok && o.ping ? 'Connected (build ' + o.build + ')' : 'No answer from that address';
   } catch (e) { $('#reqTestNote').textContent = 'No answer from that address'; }
 };
+
+/* ---------- a book your curator asked for ----------
+ * One record per request, made (and pointed at from answered[rid]) before the
+ * camera opens. Author and title are the request's and stay locked: they name
+ * the folder and the files, and a filing name is never edited. A
+ * different book in the hand is said in the note, which reaches the curator in
+ * book.json. There is no "another copy": two copies are two requests. */
+let curBook = null, bookThumbs = [];
+async function answeredMap() { return (await dbGet('kv', 'answered')) || {}; }
+async function setAnswered(rid, patch) {
+  if (!rid) return;
+  const a = await answeredMap();
+  a[rid] = { ...(a[rid] || {}), ...patch };
+  await dbPut('kv', a, 'answered');
+}
+function bookReady(shots) { return BOOK_SHOTS.every(s => shots.some(x => x.shotId === s.id && x.blob)); }
+async function openBookFromRequest(rid) {
+  const c = (await dbGet('kv', 'requests')) || { items: [] };
+  const it = (c.items || []).find(x => x.rid === rid);
+  const a = (await answeredMap())[rid];
+  let bk = a && a.bookId ? await dbGet('books', a.bookId) : null;
+  if (!bk && !it) return openRequests();
+  if (!bk) {
+    // A record deleted after an upload is made again with the folder it used,
+    // so a second answer goes into the same folder.
+    const box = it.box && typeof it.box === 'object' ? it.box : null;
+    bk = {
+      id: Date.now().toString(36), kind: 'book', template: 'spot',
+      author: String(it.author || ''), title: String(it.title || ''),
+      requestId: rid, requestBookId: String(it.bookId || ''),
+      shelfRef: { shelfId: String(it.shelfId || ''), shelfFolderId: it.key, file: box ? String(box.file || '') : '',
+        box: box ? [box.x, box.y, box.w, box.h] : null, where: String(it.where || '') },
+      asked: String(it.asked || ''), note: '',
+      operator: settings.operator || '', created: Date.now(), startedAt: Date.now(), finishedAt: null,
+      driveFolderId: (a && a.driveFolderId) || '', driveFolderName: '',
+    };
+    await dbPut('books', bk);
+    await setAnswered(rid, { bookId: bk.id, driveFolderId: bk.driveFolderId, ready: false });
+  }
+  curBook = bk;
+  reqFreeUrl();
+  backToBook();
+}
+function backToBook() {
+  stopCam();
+  stopLevel();
+  freeGate();
+  stopVoice();
+  if (!curBook) return openRequests();
+  show('scr-book', { title: 'Book', back: async () => { await leaveBook(); openRequest(curBook.requestId); } });
+  renderBook();
+}
+async function renderBook() {
+  const bk = curBook;
+  bookThumbs.forEach(u => URL.revokeObjectURL(u));
+  bookThumbs = [];
+  const shots = await shotsFor(bk.id);
+  $('#bkTitle').textContent = bk.title || '(no title)';
+  $('#bkAuthor').textContent = bk.author ? 'by ' + bk.author : '';
+  $('#bkWhere').textContent = (bk.shelfRef && bk.shelfRef.where) || '';
+  $('#bkAsked').textContent = bk.asked || '';
+  $('#bkAsked').classList.toggle('hidden', !bk.asked);
+  $('#inBkNote').value = bk.note || '';
+  $('#bkNoteWrap').classList.toggle('hidden', !bk.note);
+  $('#btnBkDifferent').classList.toggle('hidden', !!bk.note);
+  const list = $('#bkShots');
+  list.innerHTML = '';
+  for (const s of BOOK_SHOTS) {
+    const got = shots.find(x => x.shotId === s.id && x.blob);
+    const row = document.createElement('div');
+    row.className = 'bkshot' + (got ? ' got' : '');
+    row.dataset.shot = s.id;
+    let thumb = '<span class="bk-thumb empty">📷</span>';
+    if (got) { const u = URL.createObjectURL(got.blob); bookThumbs.push(u); thumb = `<img class="bk-thumb" alt="${esc(s.id)}" src="${u}">`; }
+    row.innerHTML = `<button class="bk-view" aria-label="${got ? 'View' : 'Take'} ${esc(s.id)}">${thumb}</button>` +
+      `<div class="bk-body"><div class="bk-name"><span class="bk-req">●</span> ${esc(s.id)} ${esc(s.label)}</div>` +
+      `<button class="bk-take">${got ? 'Re-shoot' : '📷 Take this photo'}</button></div>`;
+    row.querySelector('.bk-take').onclick = () => openBookCamera(s.id);
+    row.querySelector('.bk-view').onclick = () => got ? openViewer(got) : openBookCamera(s.id);
+    list.appendChild(row);
+  }
+  const words = shots.find(x => x.shotId === BOOK_WORDS.id);
+  $('#inBkWords').value = words ? words.text || '' : '';
+  $('#btnBkWordsVoice').classList.toggle('hidden', !SpeechRec);
+  $('#btnBkNoteVoice').classList.toggle('hidden', !SpeechRec);
+  paintBookUpload(bk, bookReady(shots));
+}
+function paintBookUpload(bk, ready) {
+  const up = uploadActive(bk);
+  $('#btnBkUpload').disabled = !ready || up || !!bk.uploaded;
+  $('#btnBkUpload').textContent = up ? uploadLabel(bk) : bk.uploaded ? 'Sent - waiting for your curator' : '☁ Upload to Google Drive';
+  $('#bkStatus').textContent = bk.upload && bk.upload.state === 'failed' ? uploadLabel(bk)
+    : !ready ? 'Both photos are needed before this can be sent.' : '';
+}
+async function keepBookShot(shotId, bmp, blob) {
+  const bk = curBook;
+  await dbPut('shots', { bookId: bk.id, shotId, blob, w: bmp.width, h: bmp.height, when: Date.now() });
+  await bookChanged(bk);
+  backToBook();
+  toast(`${shotId} saved ✓`);
+}
+// Anything kept, deleted or retyped: the book is no longer what was uploaded,
+// and the request's state on this phone follows.
+async function bookChanged(bk) {
+  const ready = bookReady(await shotsFor(bk.id));
+  bk.finishedAt = ready ? Date.now() : null;
+  bk.uploaded = null;
+  await dbPut('books', bk);
+  await setAnswered(bk.requestId, { bookId: bk.id, ready, uploaded: null });
+}
+const NOTE_START = 'The book I found is: ';
+// The note and the copyright words are read off the screen when it is left
+// (dictation fills the boxes without a change event).
+async function leaveBook() {
+  stopVoice();
+  const bk = curBook;
+  if (!bk || !$('#scr-book').classList.contains('active')) return;
+  let note = $('#inBkNote').value.trim();
+  if (note === NOTE_START.trim()) note = '';
+  const words = tidyVerbatim($('#inBkWords').value);
+  const had = (await shotsFor(bk.id)).find(x => x.shotId === BOOK_WORDS.id);
+  if (note === (bk.note || '') && words === (had ? had.text || '' : '')) return;
+  bk.note = note;
+  await dbPut('books', bk);
+  if (words) await dbPut('shots', { bookId: bk.id, shotId: BOOK_WORDS.id, text: words, when: Date.now() });
+  else if (had) await dbDel('shots', [bk.id, BOOK_WORDS.id]);
+  await bookChanged(bk);
+}
+$('#btnBkDifferent').onclick = () => {
+  $('#bkNoteWrap').classList.remove('hidden');
+  $('#btnBkDifferent').classList.add('hidden');
+  const n = $('#inBkNote');
+  if (!n.value.trim()) n.value = NOTE_START;
+  n.focus();
+};
+$('#inBkNote').onchange = () => leaveBookText();
+$('#inBkWords').onchange = () => leaveBookText();
+async function leaveBookText() { await leaveBook(); if (curBook) paintBookUpload(curBook, bookReady(await shotsFor(curBook.id))); }
+$('#btnBkNoteVoice').onclick = () => beginDictation('#inBkNote', '#btnBkNoteVoice', voiceToNote);
+$('#btnBkWordsVoice').onclick = () => beginDictation('#inBkWords', '#btnBkWordsVoice', voiceToVerbatim);
+$('#btnBkDelete').onclick = () => deleteBook(curBook.id, () => openRequests());
+async function deleteBook(id, then) {
+  const bk = await dbGet('books', id);
+  if (!bk) return then();
+  if (bk.upload && bk.upload.state === 'uploading') return toast('Wait for the upload to finish');
+  if (!confirm('This book answers a request from your curator; delete it from the phone anyway?')) return;
+  stopVoice();
+  for (const s of await shotsFor(id)) await dbDel('shots', [id, s.shotId]);
+  await dbDel('books', id);
+  // answered keeps the request's folder: a new record for it goes back there.
+  await setAnswered(bk.requestId, { ready: false });
+  if (curBook && curBook.id === id) curBook = null;
+  bookThumbs.forEach(u => URL.revokeObjectURL(u));
+  bookThumbs = [];
+  then();
+}
+$('#btnBkUpload').onclick = () => startBookUpload(curBook, $('#btnBkUpload'));
+// Sign in (a tap may open Google's sign-in), then queue. A book is never shared
+// on its own: it goes under the root that was shared when the shelves went up.
+async function startBookUpload(bk, btn) {
+  if (!bk || uploadActive(bk)) return;
+  btn.disabled = true;
+  try {
+    if (curBook && curBook.id === bk.id) await leaveBook();
+    if (!bookReady(await shotsFor(bk.id))) throw new Error('Both photos are needed first');
+    if (!cred('clientId')) throw new Error('This build has no Google Client ID yet — add one in ⚙ Settings');
+    btn.textContent = 'Signing in to Google…';
+    await getToken();
+    await queueBook(bk);
+    toast('Queued — uploading while you carry on', 3000);
+    openRequests();
+    pumpUploads();
+  } catch (e) {
+    console.error(e);
+    toast(e.message, 4500);
+    btn.disabled = false;
+    btn.textContent = '☁ Upload to Google Drive';
+  }
+}
+async function queueBook(bk) {
+  const shots = await shotsFor(bk.id);
+  if (!bookReady(shots)) return false;
+  if (!bk.finishedAt) bk.finishedAt = Date.now();
+  const words = shots.some(s => s.shotId === BOOK_WORDS.id && s.text);
+  bk.upload = { state: 'queued', done: 0, total: BOOK_SHOTS.length + (words ? 1 : 0) + 1, queued: Date.now(), error: '' };
+  await dbPut('books', bk);
+  if (curBook && curBook.id === bk.id) curBook = bk;
+  return true;
+}
 
 /* ---------- uploaded shelves ---------- */
 $('#btnArchive').onclick = () => openArchive();

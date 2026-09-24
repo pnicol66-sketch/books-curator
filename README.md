@@ -61,8 +61,11 @@ at any time from Drive itself. Declining is remembered too.
 ## Privacy
 
 Everything (photos, labels, settings) is stored locally in the browser on the
-phone. Nothing leaves the phone except when you explicitly upload to your own
-Google Drive. See [privacy.html](privacy.html) and [terms.html](terms.html).
+phone. Photos go only to your own Google Drive, when you explicitly upload. To show
+your curator's requests, the app sends the Google Drive ids of folders it created
+(no photos, no names) to the curator's request service at script.google.com, and
+receives the author, title, where to find each book and what to photograph. See
+[privacy.html](privacy.html) and [terms.html](terms.html).
 
 ## Developer notes
 
