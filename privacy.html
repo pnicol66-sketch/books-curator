@@ -33,15 +33,17 @@ footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
 <body>
 
 <h1>Books Curator — Privacy Policy</h1>
-<p class="updated">Last updated 24 September 2026</p>
+<p class="updated">Last updated 27 September 2026</p>
 
 <p>Books Curator is a photography app for cataloguing books. It runs in your web
-browser on your own phone. There is no account to create, and no company collecting
-anything about you.</p>
+browser on your own phone. There is no account to create for the app, and no company
+collecting anything about you through it. Private library websites, which a curator can
+publish for a client, work differently: see <a href="#libraries">Private library
+websites</a>.</p>
 
 <div class="box">
-  <p style="margin:0"><strong>The short version.</strong> Your photographs stay on your
-  phone and in your own Google Drive. When you open the app, it asks your curator's
+  <p style="margin:0"><strong>The short version.</strong> The app keeps your photographs on
+  your phone and in your own Google Drive. When you open the app, it asks your curator's
   request service (at script.google.com) which of your uploaded shelves have books to
   photograph. It sends only the Google Drive ids of folders the app created on your
   Drive (no photos, no names), and receives the author, title, where to find each book
@@ -105,6 +107,32 @@ in the viewfinder. The readings are used on the spot and never stored or sent.</
 to also forget which shelves this phone uploaded: unless you say yes, it keeps that
 list (the shelf labels and book titles) so your curator's requests keep appearing.
 Photographs already in your Google Drive are yours to keep or delete there.</p>
+
+<h2 id="libraries">Private library websites</h2>
+<p>A curator can also publish the books they have documented for a client as a private
+library website, at its own address under <code>bookscurator.net</code>. This is separate
+from the app. Only the people on the library's list can open it: the client, anyone the
+client names in writing, and the curator, who can always open it. The pages are delivered
+by Cloudflare. Its sign-in service, <strong>Cloudflare Access</strong>, holds the list's
+email addresses and records sign-ins, including refused ones, with the email address,
+time, IP address and country: a record the curator can see. If you sign in with Google,
+Google asks before sharing your name, email address and profile picture with Cloudflare.
+A named viewer without a Google account can instead be set up to sign in with a one-time
+code, which Cloudflare emails to them. The library's pages and copies of its photographs,
+with their location data removed, are stored privately on <strong>Cloudflare R2</strong>
+and shown only to people on the list, after they sign in. Someone taken off the list can
+keep access until their sign-in ends, at most 24 hours after it began. The sign-in uses
+Cloudflare's own cookies. The library pages themselves set none, and carry no valuations,
+analytics or advertising.</p>
+<p><strong>Deleting a library.</strong> When the client asks in writing, the whole library
+website is deleted: its pages, the website's copies of the photographs, its sign-in and
+list of viewers, its address, the file it was built from, and the built copy on the
+curator's computer. This cannot be undone. Deletion does not touch your photographs in
+your own Google Drive, or your curator's own records of your books, including copies of
+some photographs. Records Cloudflare has already made, such as past sign-ins in the
+curator's Cloudflare account, are not removed by this deletion, and a Google sign-in stays
+listed in your Google Account until you remove it there. Anyone on a library's list can
+also ask to be taken off it. To ask, write to your curator or to the address below.</p>
 
 <footer>Questions: pnicol66@gmail.com · <a href="terms.html">Terms of Use</a></footer>
 </body>
