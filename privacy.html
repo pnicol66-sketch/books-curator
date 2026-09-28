@@ -3,11 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f1e7">
+<meta name="color-scheme" content="light">
 <title>Privacy Policy — Books Curator</title>
 <style>
+/* Light (paper) only, the app's and the library sites' palette (owner, 28 Sep 2026). */
 :root {
-  --bg: #101013; --card: #1b1b20; --line: #2a2a31;
-  --text: #ececf0; --dim: #9a9aa5; --accent: #d9a441;
+  --bg: #f6f1e7; --card: #fbf8f2; --line: #dccfbb;
+  --text: #1d1915; --dim: #5c5347; --accent: #7b2d26; --link: #8c3329;
+  color-scheme: light;
 }
 * { box-sizing: border-box; }
 body {
@@ -21,8 +25,8 @@ p, li { color: var(--text); }
 .updated { color: var(--dim); font-size: 14px; margin: 0 0 28px; }
 ul { padding-left: 22px; }
 li { margin-bottom: 7px; }
-strong { color: #fff; }
-a { color: var(--accent); }
+strong { color: var(--text); }
+a { color: var(--link); }
 .box {
   background: var(--card); border: 1px solid var(--line); border-radius: 12px;
   padding: 14px 18px; margin: 22px 0;
