@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
 <title>Privacy Policy — Books Curator</title>
 <style>
 :root {
@@ -34,13 +35,15 @@ footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
 <body>
 
 <h1>Books Curator — Privacy Policy</h1>
-<p class="updated">Last updated 27 September 2026</p>
+<p class="updated">Last updated 29 September 2026</p>
 
 <p>Books Curator is a photography app for cataloguing books. It runs in your web
-browser on your own phone. There is no account to create for the app, and no company
-collecting anything about you through it. Private library websites, which a curator can
-publish for a client, work differently: see <a href="#libraries">Private library
-websites</a>.</p>
+browser on your own phone. Books Curator is provided by Paul Nicol, and where this page says
+"your curator" or "the curator", it means Books Curator. There is no account to create for the app, and it collects
+nothing about you beyond what this page describes. What your curator does once you share
+a folder with them, and the private library websites Books Curator can publish for a client,
+work differently: see <a href="#curator">After you share a folder with your curator</a>
+and <a href="#libraries">Private library websites</a>.</p>
 
 <div class="box">
   <p style="margin:0"><strong>The short version.</strong> The app keeps your photographs on
@@ -49,17 +52,29 @@ websites</a>.</p>
   photograph. It sends only the Google Drive ids of folders the app created on your
   Drive (no photos, no names), and receives the author, title, where to find each book
   and what to photograph. It also tells the service which requests your phone has
-  received, and your curator's list records that date.</p>
+  received, and your curator's list records that date. If you share your upload folder
+  with your curator, see <a href="#curator">After you share a folder with your curator</a>
+  for what happens to it.</p>
 </div>
 
 <h2>What the app stores, and where</h2>
 <ul>
-  <li><strong>On your phone.</strong> Your shelf photographs, the details you type
-  (shelf labels, notes, counts, your name) and your settings are held in your browser's
-  local storage on the device. They are not transmitted anywhere by the app.</li>
-  <li><strong>In your Google Drive, if you choose.</strong> When you tap "Upload", the
-  app copies that shelf's or book's photographs and a small text record into a folder in
-  <em>your own</em> Google Drive account. You own those files.</li>
+  <li><strong>On your phone.</strong> Your photographs (of shelves, and of any books your
+  curator asks for), the details you type or dictate (shelf labels, notes, counts,
+  copyright-page words, your name), your curator's requests and your settings are kept in
+  this app's storage in your browser on the device. Your photographs, details and settings stay there, also after an
+  upload, until you delete them; the list of your curator's requests is refreshed each
+  time the app checks. The photographs and the details you entered leave the phone only
+  when you upload them into your own Google Drive (next point); if you dictate, your
+  browser's voice service hears what you say (see below). The app saves each
+  photograph as a fresh image, without location data.</li>
+  <li><strong>In your Google Drive, if you choose.</strong> When you upload (tap Upload,
+  or tap Next shelf within about an hour of signing in to Google), the app copies that
+  shelf's or book's photographs into a folder in <em>your own</em> Google Drive account,
+  with small text files of the details: the shelf label or the requested book's author
+  and title, the notes, tags, count and copyright-page words you entered, your name, and
+  when you took the photographs. You own those
+  files.</li>
 </ul>
 
 <h2>What the app can see in your Google Drive</h2>
@@ -68,24 +83,30 @@ websites</a>.</p>
 you explicitly hand to it. It cannot see, read, or list anything else in your Drive.</p>
 
 <h2>Sharing a folder</h2>
-<p>Some copies of this app are set up to work with a curator's archive. In that case,
-the first time you upload, the app asks whether to share <strong>the Books Curator
-folder</strong> with a named email address, which is shown to you in the prompt.</p>
+<p>The app is set up to work with your curator. The first time you upload, it asks
+whether to share <strong>your upload folder</strong> with your curator's email address;
+the prompt shows the folder's name and the address.</p>
 <ul>
   <li>Sharing is <strong>read-only</strong> — the other person can view and download, not
   alter or delete.</li>
   <li>It happens <strong>only if you agree</strong>. Decline and nothing is shared.</li>
-  <li>It covers that folder alone. Nothing else in your Drive is affected.</li>
-  <li>You remain the owner and can stop sharing at any time from Google Drive itself.</li>
+  <li>It covers that folder and everything in it, including later uploads. Nothing else in
+  your Drive is affected.</li>
+  <li>You remain the owner and can stop sharing at any time from Google Drive itself.
+  Copies your curator has already made are not affected: see <a href="#curator">After you
+  share a folder with your curator</a>.</li>
 </ul>
 
 <h2>What the app sends over the internet</h2>
-<p>Only to Google:</p>
+<p>To the app's own address, and to Google:</p>
 <ul>
+  <li><code>bookscurator.net</code> — the app's own files, hosted by GitHub Pages. Each
+  time you open the app or return to it, it checks there for a new version. The app sends
+  it nothing else.</li>
   <li><code>accounts.google.com</code> — to sign you in to your own Google account, when
-  you tap Upload</li>
+  you upload</li>
   <li><code>www.googleapis.com</code> — to upload your photographs to your own Drive, when
-  you tap Upload</li>
+  you upload</li>
   <li><code>script.google.com</code> — your curator's request service. Once you have
   uploaded a shelf, the app asks it whether your curator would like any of your books
   photographed: automatically, at most once a minute, when the app opens or comes back
@@ -94,9 +115,10 @@ folder</strong> with a named email address, which is shown to you in the prompt.
   curator's list records that date). The answer comes back from
   <code>script.googleusercontent.com</code>.</li>
 </ul>
-<p>The app uses no analytics, no advertising, no tracking, and no third-party
-services of any other kind. Voice dictation, if you use it, is provided by your
-phone's browser and follows its own privacy terms.</p>
+<p>Like any website, each of these sees your phone's internet (IP) address when the app
+contacts it. The app uses no analytics, no advertising, no tracking, and no other
+third-party services. Voice dictation, if you use it, is provided by your phone's browser
+and follows its own privacy terms.</p>
 
 <h2>Motion sensors</h2>
 <p>While the camera is open the app reads the phone's tilt sensor to draw a level line
@@ -106,18 +128,41 @@ in the viewfinder. The readings are used on the spot and never stored or sent.</
 <p>Delete any shelf from the home screen, or everything the app holds from
 <strong>Settings → Delete ALL app data on this phone</strong>. The app then asks whether
 to also forget which shelves this phone uploaded: unless you say yes, it keeps that
-list (the shelf labels and book titles) so your curator's requests keep appearing.
-Photographs already in your Google Drive are yours to keep or delete there.</p>
+list (the Google Drive folder ids of the shelves and books this phone uploaded, with
+their labels and titles, and which requests you opened or answered) so your curator's requests
+keep appearing. Deleting a single uploaded shelf or requested book removes its
+photographs and details from the phone but leaves its Drive folder id, with its label or
+title, on that list, so your curator's requests for it still appear. Photographs
+already in your Google Drive are yours to keep or delete there; copies your curator has
+already made stay in your curator's records: see <a href="#curator">After you share a
+folder with your curator</a>.</p>
+<p>To withdraw the app's access to your Google Drive, remove Books Curator from the
+third-party connections in your Google Account. Removing the app from your home screen
+may leave what it saved in your browser: use Delete ALL app data first, and say yes to
+each question it asks.</p>
+
+<h2 id="curator">After you share a folder with your curator</h2>
+<p>Once your folder is shared, your curator's own tools read it to identify and document
+your books. They copy some photographs and details (such as shelf labels, notes, the name
+you entered and when you took the photographs) into your curator's own records. They send
+reduced copies of your photographs (of shelves, and of books your curator asked for), with
+the labels and any copyright-page words you entered, to an outside research service that
+reads them and writes short notes on the books for your curator. They
+may also look up titles and authors, never photographs, in public book catalogues and on
+the web. Stopping sharing ends your curator's access to the folder; copies already made
+stay in your curator's records. To ask about them, write to your curator or to the address
+below.</p>
 
 <h2 id="libraries">Private library websites</h2>
-<p>A curator can also publish the books they have documented for a client as a private
+<p>Books Curator can also publish the books it has documented for a client as a private
 library website, at its own address under <code>bookscurator.net</code>. This is separate
 from the app. Only the people on the library's list can open it: the client, anyone the
 client names in writing, and the curator, who can always open it. The pages are delivered
 by Cloudflare. Its sign-in service, <strong>Cloudflare Access</strong>, holds the list's
 email addresses and records sign-ins, including refused ones, with the email address,
 time, IP address and country: a record the curator can see. If you sign in with Google,
-Google asks before sharing your name, email address and profile picture with Cloudflare.
+Google shows what it will share with Cloudflare (such as your name, email address and
+profile picture) and asks first.
 A named viewer without a Google account can instead be set up to sign in with a one-time
 code, which Cloudflare emails to them. The library's pages and copies of its photographs,
 with their location data removed, are stored privately on <strong>Cloudflare R2</strong>
@@ -126,12 +171,13 @@ keep access until their sign-in ends, at most 24 hours after it began. The sign-
 Cloudflare's own cookies. The library pages themselves set none, and carry no valuations,
 analytics or advertising.</p>
 <p><strong>Deleting a library.</strong> When the client asks in writing, the whole library
-website is deleted: its pages, the website's copies of the photographs, its sign-in and
+website is deleted within 10 business days: its pages, the website's copies of the photographs, its sign-in and
 list of viewers, its address, the file it was built from, and the built copy on the
 curator's computer. This cannot be undone. Deletion does not touch your photographs in
 your own Google Drive, or your curator's own records of your books, including copies of
-some photographs. Records Cloudflare has already made, such as past sign-ins in the
-curator's Cloudflare account, are not removed by this deletion, and a Google sign-in stays
+some photographs. Records Cloudflare has already made in the
+curator's Cloudflare account, such as past sign-ins and the email address (and name, if
+the sign-in gave one) of each person who has signed in, are not removed by this deletion, and a Google sign-in stays
 listed in your Google Account until you remove it there. Anyone on a library's list can
 also ask to be taken off it. To ask, write to your curator or to the address below.</p>
 

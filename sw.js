@@ -1,5 +1,5 @@
 'use strict';
-const CACHE = 'bookcurator-20260928-140749';
+const CACHE = 'bookcurator-20260929-205048';
 const ASSETS = [
   './', './index.html', './app.js', './manifest.webmanifest',
   './icon.svg', './icon-192.png', './icon-512.png', './icon-512-maskable.png',

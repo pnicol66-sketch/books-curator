@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20260928-140749';
+const APP_VERSION = '20260929-205048';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -216,7 +216,7 @@ async function deleteShelf(id) {
   const sh = await dbGet('shelves', id);
   if (!sh) return goHome();
   if (sh.upload && sh.upload.state === 'uploading') return toast('Wait for the upload to finish');
-  if (!confirm(`Delete "${sh.label}" and its photos from this phone?`)) return;
+  if (!confirm(`Delete “${sh.label}” and its photos from this phone? Photos that were not uploaded are lost for good.`)) return;
   for (const p of await photosFor(id)) await dbDel('photos', [id, p.n]);
   await dbDel('shelves', id);
   goHome();
@@ -353,7 +353,7 @@ async function openCamera(frameNo) {
   show('scr-camera', { title: curShelf.label, back: backToShelf });
   $('#camLabel').textContent = n > 1 || curFrame ? `${curShelf.label} · frame ${n}` : curShelf.label;
   $('#camTip').textContent = n > 1 && !curFrame
-    ? '📸 Overlap the last frame by about a quarter, same distance, same height'
+    ? '📸 Move right · overlap the last frame by about a quarter · same distance and height'
     : CAM_TIP;
   $('#camFallback').classList.add('hidden');
   await startCam();
@@ -390,7 +390,7 @@ async function startCam() {
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 3072 } },
     });
   } catch (e) {
-    return camFail('Camera unavailable or permission denied. You can still import a photo taken with the camera app.');
+    return camFail('The camera is blocked or busy. To use it here, allow Camera for bookscurator.net in your browser’s settings, then open the app again. Or take the photo with the camera app:');
   }
   const v = $('#video');
   v.srcObject = stream;
@@ -682,7 +682,7 @@ async function keepFrame() {
     toast(`Frame ${n} saved ✓`);
   } catch (e) {
     console.error(e);
-    toast('Save failed: ' + e.message, 4000);
+    toast('Could not save the photo on this phone. Is its storage full?', 4000);
   } finally {
     btn.disabled = false;
     btn.textContent = '✓ Yes — keep';
@@ -820,7 +820,7 @@ function startVoiceSession() {
       voiceWant = false;
       toast('Microphone blocked — allow mic access for this site in your browser settings', 4200);
     } else if (e.error !== 'aborted' && e.error !== 'no-speech') {
-      toast('Dictation error: ' + e.error, 3500);
+      toast('Dictation is not working just now (no connection?). You can type it instead.', 3500);
     }
   };
   rec.onend = () => {
@@ -989,7 +989,7 @@ function loadPicker() {
 function pickerReady() { return !!(cred('clientId') && cred('apiKey') && cred('projectNumber')); }
 async function pickFolder() {
   if (!pickerReady())
-    throw new Error('Linking needs the API key and project number in Settings, not just the Client ID');
+    throw new Error('Link… is for your curator only (it needs the API key and project number under Advanced). Type the folder name your curator gave you in the box instead.');
   const token = await getToken();
   await loadPicker();
   return new Promise(res => {
@@ -1060,11 +1060,11 @@ async function shareFolder(folderId, folderName, st) {
         'Sharing it read-only lets the curator read them without you sending anything — ' +
         'otherwise they stay where only you can see them.\n\n' +
         'You stay the owner. Nothing else in your Drive is shared, and you can ' +
-        'stop sharing at any time from Drive itself.');
+        'stop sharing at any time from Drive itself.\n\nIf you tap Cancel, your curator cannot see your shelves, and the app will not ask again.');
       if (!ok) {
         seen[folderId] = 'declined';
         await dbPut('kv', seen, 'sharedFolders');
-        toast('Not shared — the folder stays private to you', 4500);
+        toast('Not shared. Your curator cannot see these shelves, and the app will not ask again: tell your curator.', 4500);
         return;
       }
       // No email anywhere in the flow (owner, 8 Sep 2026): the curator finds the
@@ -1113,7 +1113,7 @@ function uploadLabel(sh) {
   if (!u) return '';
   if (u.state === 'queued') return '⏳ Waiting to upload';
   if (u.state === 'uploading') return `☁ Uploading ${u.done}/${u.total}…`;
-  if (u.state === 'paused') return '⏸ Upload paused — sign in to continue';
+  if (u.state === 'paused') return '⏸ Upload paused — sign in from the home screen';
   if (u.state === 'failed') return '⚠ Upload failed — ' + (u.error || 'tap ↻ to retry');
   return '';
 }
@@ -1151,7 +1151,7 @@ async function prepareUpload(st) {
   if (!cred('clientId')) throw new Error('This build has no Google Client ID yet — add one in ⚙ Settings');
   st('Signing in to Google…');
   await getToken();
-  st('Finding your Books Curator folder…');
+  st('Finding your Drive folder…');
   const id = await resolveRootFolder();
   const name = settings.driveFolder || 'Books Curator';
   rootCache = { id, name };
@@ -1244,7 +1244,7 @@ async function uploadShelf(sh) {
  * named in Settings and never a search by name: a phone that lost its settings,
  * or a second phone, still files the answer where the curator reads. */
 const DRIVE_FILES = 'https://www.googleapis.com/drive/v3/files/';
-const SHELF_GONE = 'The shelf this request belongs to is no longer in your Google Drive - tell your curator';
+const SHELF_GONE = 'Could not open this shelf’s folder. Reopen the app, sign in with your shelves’ Google account, or tell your curator';
 async function requestRootFolder(key) {
   const get = async (id, fields) => {
     try { return await drive(DRIVE_FILES + encodeURIComponent(id) + '?fields=' + fields); }
@@ -1415,7 +1415,7 @@ $('#btnUploadAll').onclick = async () => {
       if (sh.uploaded || sh.upload) continue;
       if (await queueShelf(sh)) n++;
     }
-    toast(`Queued ${n} shelf${n === 1 ? '' : 'ves'} — uploading while you carry on`, 3200);
+    toast(`Queued ${n} ${n === 1 ? 'shelf' : 'shelves'} — uploading while you carry on`, 3200);
     goHome();
     pumpUploads();
   } catch (e) {
@@ -1594,14 +1594,14 @@ async function openRequests() {
     list.appendChild(row);
   }
   if (!started.length) return;
-  const h = document.createElement('h2'); h.className = 'sect'; h.textContent = 'Started on this phone';
+  const h = document.createElement('h2'); h.className = 'sect'; h.textContent = 'No longer asked for';
   list.appendChild(h);
   for (const bk of started) {
     const row = document.createElement('div');
     row.className = 'reqitem started';
     row.dataset.book = bk.id;
     row.innerHTML = `<div class="rq-t">${esc(bk.title || '(no title)')}</div><div class="rq-a">${esc(bk.author || '')}</div>` +
-      `<div class="rq-s">${esc(bk.upload ? uploadLabel(bk) : '')}</div>` +
+      `<div class="rq-s">${esc(bk.upload ? uploadLabel(bk) : 'Upload it if both photos were taken; otherwise delete it.')}</div>` +
       '<div class="row2" style="margin-top:10px"><button class="secondary st-up">☁ Upload</button><button class="secondary danger st-del">Delete</button></div>';
     const up = row.querySelector('.st-up');
     up.disabled = (uploadActive(bk) && bk.upload.state !== 'paused') || !bookReady(await shotsFor(bk.id));
@@ -1875,7 +1875,7 @@ async function openArchive() {
   list.innerHTML = '';
   const done = (await dbAll('shelves')).filter(s => s.uploaded).sort((a, b) => b.uploaded - a.uploaded);
   $('#arcStatus').textContent = done.length
-    ? 'These are in your Google Drive under Books Curator / _Shelves. The photos are still on this phone until you delete them.'
+    ? `These are in your Google Drive, in “${settings.driveFolder}” / _Shelves. Keep the photos on this phone until your curator says the work is finished: a request shows the book on your own shelf photo.`
     : 'Nothing uploaded yet.';
   for (const sh of done) {
     const photos = await photosFor(sh.id);
@@ -1894,7 +1894,7 @@ async function openArchive() {
       goHome();
     };
     row.querySelector('.sh-del').onclick = async () => {
-      if (!confirm(`Delete "${sh.label}" from this phone? It stays in your Google Drive.`)) return;
+      if (!confirm(`Delete “${sh.label}” from this phone? It stays in your Google Drive, but your curator’s requests can no longer show a book on its photo.`)) return;
       for (const p of photos) await dbDel('photos', [sh.id, p.n]);
       await dbDel('shelves', sh.id);
       openArchive();
@@ -1923,9 +1923,9 @@ function openSettings() {
 }
 function renderLinkNote() {
   $('#linkNote').textContent = settings.driveFolderId
-    ? '🔗 Linked to a folder that already exists in Drive. Tap Link… to unlink.'
+    ? '🔗 Linked to a folder that already exists in Drive.'
     : '';
-  $('#btnLink').textContent = settings.driveFolderId ? 'Linked' : 'Link…';
+  $('#btnLink').textContent = settings.driveFolderId ? 'Unlink…' : 'Link…';
 }
 // The picker needs live credentials and the owner may have only just typed
 // them, so take them off the form - and keep them - before opening it.
@@ -1985,11 +1985,11 @@ $('#btnSaveSettings').onclick = async () => {
   goHome();
 };
 $('#btnWipe').onclick = async () => {
-  if (!confirm('Delete ALL shelves, photos, and settings stored by this app on this phone?')) return;
+  if (!confirm('Delete every shelf, photo and setting this app holds on this phone? Photos not yet uploaded are lost for good, and the app forgets your folder name. Your curator does not need you to do this.')) return;
   // Which shelves this phone uploaded is how it finds your curator's requests:
   // kept unless you say otherwise. The client id is never cleared (BUILTIN wins).
   const held = await heldIds(), answered = (await dbGet('kv', 'answered')) || {};
-  const forget = Object.keys(held).length > 0 && confirm('Also forget which shelves this phone uploaded? Your curator\'s requests for them will stop appearing.');
+  const forget = Object.keys(held).length > 0 && confirm('Also forget which shelves this phone uploaded? OK forgets them, and your curator\'s requests for them stop appearing. Cancel keeps them, so the requests still appear.');
   await dbClear('photos');
   await dbClear('shelves');
   await dbClear('books');
@@ -2001,7 +2001,7 @@ $('#btnWipe').onclick = async () => {
   }
   Object.assign(settings, { clientId: '', apiKey: '', projectNumber: '', shareWith: '', operator: '', quality: 0.95, driveFolder: 'Books Curator', driveFolderId: '', requestsUrl: '' });
   reqLastTry = 0;
-  toast('All app data deleted');
+  toast('Deleted. Before your next upload, ask your curator what to type in ⚙ Settings.', 4500);
   goHome();
 };
 
