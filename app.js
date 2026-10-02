@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20260929-205048';
+const APP_VERSION = '20261002-164348';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -48,6 +48,176 @@ const BOOK_SHOTS = [
     gate: 'Drag the loupe over the smallest print. Can you read it?' },
 ];
 const BOOK_WORDS = { id: '13', name: 'Copyright Verbatim' };
+
+/* ---------- full capture: the whole book (scope Appendix C, frozen 2 Oct 2026) ----------
+ * The curator asks for every photo of a book whose two spot-check photos are
+ * filed. The phone adds to that book's own folder (named by the request, checked
+ * by id) and never makes one; 01 and 12 stay as they were sent (locked, never
+ * sent again). Shot numbers and file names are permanent from the first upload:
+ * one file name per shot number, whatever the template. */
+// Every word the client sees that came with full capture, in one place, so the
+// owner can change the wording after his yes (F20) without hunting through code.
+const FULL_WORDS = {
+  wholeBook: n => `Whole book - ${n} photos`,
+  twoPhotos: '2 photos',
+  progress: (n, m) => `${n} of ${m} done`,
+  shoot: 'Photograph the whole book',
+  keepOpen: 'Keep the app open until it says Sent.',
+  sent: 'Sent - waiting for your curator',
+  checkLine: 'a check for your curator, never on the website',
+  cant: 'Can\'t take this one',
+  cantWhy: { 'not-on-book': 'Not on this book', missing: 'Missing or torn off', other: 'Other' },
+  cantOther: 'Say why',
+  different: 'This book is different',
+  notSure: 'Not sure',
+  notSureLine: 'Your curator will judge it from the photos.',
+  driveFull: 'Your Google Drive is full',
+  folderGone: 'This phone can\'t open this book\'s folder. Tell your curator.',
+  needUpdate: 'This request needs the newest version of the app: pull down, then Update',
+  sentEarlier: 'Sent earlier',
+  optional: 'Optional',
+  alsoTaken: 'Also taken (kept and sent with the rest)',
+  chooseGrades: 'Choose how good the jacket and the book are.',
+  chooseGrade: 'Choose how good the book is.',
+  noLonger: 'Your curator no longer asks for this book',
+  closed: 'Your curator no longer asks for this book. Delete it from this phone when you like.',
+  // The template line on the request and the checklist, by template code.
+  templates: { hc: 'Hardcover with its jacket', pb: 'Paperback' },
+  // "This book is different": switch to the other list, with a reason.
+  switchTo: { hc: 'Switch to the list for a hardcover with its jacket', pb: 'Switch to the list for a paperback' },
+  switchWhy: { hc: 'It has hard covers and a jacket', pb: 'It has soft covers, no jacket' },
+  switchKeep: 'Every photo you have taken is kept.',
+  switchGo: 'Switch',
+  cancel: 'Cancel',
+  gradeHeads: { jacket: 'The jacket', book: 'The book' },
+  // One plain line per grade, in our own words (the source glossary is named in
+  // the build report; F20 (2)).
+  gradeLines: {
+    F: 'Fine: like new. It may have been read, but it has no faults.',
+    NF: 'Near Fine: almost Fine, with one or two very small faults.',
+    'VG+': 'Very Good plus: better than Very Good, not quite Near Fine.',
+    VG: 'Very Good: some light wear, but nothing torn.',
+    G: 'Good: an ordinary used copy, worn but complete.',
+    FR: 'Fair: well worn. All the text is there, but an endpaper or similar may be missing.',
+    P: 'Poor: so worn that only the text is worth keeping (a reading copy).',
+  },
+};
+// C7: the grade buttons, and the chips in the sheet's own list words.
+const FULL_GRADES = ['F', 'NF', 'VG+', 'VG', 'G', 'FR', 'P'];
+const FULL_FLAGS = {
+  jacket: ['Price-clipped', 'Facsimile', 'Mylar (removed to shoot)'],
+  book: ['Ex-library', 'Remainder mark', 'Previous-owner inscription', 'Bookplate'],
+};
+// C1: one file name per shot number, whatever the template. 01 and 12 keep their
+// spot-check file names; 13 is the copyright page's words (.txt).
+const FULL_NAMES = {
+  '03': 'Back', '05': 'Spine', '06': 'Front Flap', '07': 'Corner', '08': 'Rear Flap', '09': 'Front Board',
+  '10': 'Spine Jacket Off', '11': 'Title Page', '14': 'Colophon', '15': 'Signature', '16': 'Edges', '17': 'Gutter',
+  '20': 'Rear Board', '23': 'Other', '27': 'Copyright Check',
+};
+const FULL_KEPT = ['01', '12'];
+const FULL_TEXT = { id: '13', name: 'Copyright Verbatim' };
+// The checklist per template, in the order her hands meet the book. Numbers are
+// permanent file numbers; only the screen order follows the handling. req: true
+// = required (or "Can't take this one"); kept: sent at spot-check, locked; torch:
+// the torch starts on. grades: where the grade pickers sit.
+const FULL_TEMPLATES = {
+  hc: {
+    grades: ['jacket', 'book'],
+    groups: [
+      { head: 'Jacket on, book closed', shots: [
+        { id: '01', kept: true, label: 'Front of the jacket' },
+        { id: '05', req: true, label: 'Spine of the jacket, square on', gate: 'Can you read the lettering at the foot?',
+          tip: '📸 The jacket spine, square on · top to foot · flash off' },
+        { id: '03', req: true, label: 'Back of the jacket', gate: 'Is the whole back in the photo, with no glare?',
+          tip: '📸 The whole back of the jacket, square on · no glare' },
+        { id: '16', req: true, label: 'Page edges: top and side together, book closed', gate: 'Can you see both edges?',
+          tip: '📸 Book closed · the top and side edges together, at an angle' },
+      ] },
+      { head: 'Open the cover, flaps out', shots: [
+        { id: '06', req: true, label: 'Front flap, unfolded', gate: 'Can you read the flap text?',
+          tip: '📸 Open the cover · unfold the front flap flat · the whole flap' },
+        { id: '07', req: true, label: 'Front flap, top corner, close up', gate: 'Can you read the small print in the corner?',
+          tip: '📸 Close up on the top corner of the front flap' },
+        { id: '08', req: true, label: 'Back flap, unfolded', gate: 'Can you read the small print?',
+          tip: '📸 Unfold the back flap flat · the whole flap' },
+      ] },
+      { head: 'Book open flat', shots: [
+        { id: '11', req: true, label: 'Title page, the whole page', gate: 'Can you read the smallest print?',
+          tip: '📸 Open flat at the title page · the whole page, square on' },
+        { id: '12', kept: true, label: 'Copyright page' },
+        { id: '27', req: true, check: true, label: 'Copyright page again, the whole page', gate: 'Can you read the number line?',
+          tip: '📸 The copyright page again · the whole page, square on · flash off' },
+      ] },
+      { head: 'Take the jacket off', shots: [
+        { id: '09', req: true, label: 'Front cover of the book itself', gate: 'Is the whole cover in the photo?',
+          tip: '📸 Jacket off · the whole front cover, square on' },
+        { id: '10', req: true, label: 'Spine of the book itself', gate: 'Can you read the lettering?',
+          tip: '📸 Jacket off · the spine, square on, top to foot' },
+        { id: '20', req: true, torch: true, label: 'Back cover of the book itself, tilted so marks cast a shadow',
+          gate: 'Can you see the lower corner clearly?', tip: '📸 Jacket off · the back cover, tilted so marks cast a shadow · torch on' },
+      ] },
+      { head: 'Put the jacket back', grades: true, shots: [] },
+      { head: 'Optional', optional: true, words: true, shots: [
+        { id: '14', label: 'Colophon or limitation page', gate: 'Can you read the smallest print?',
+          tip: '📸 The colophon or limitation page · the whole page' },
+        { id: '15', label: 'Signature or inscription', gate: 'Can you read the writing?',
+          tip: '📸 The signature or inscription, close enough to read' },
+        { id: '17', torch: true, label: 'Gutter: look down into the middle of the open book', gate: 'Can you see down into the gutter?',
+          tip: '📸 Open in the middle · look down into the gutter · torch on' },
+        { id: '23', label: 'Anything else your curator should see', gate: 'Is it sharp?',
+          tip: '📸 Anything else your curator should see' },
+      ] },
+    ],
+  },
+  pb: {
+    grades: ['book'],
+    groups: [
+      { head: 'Book closed', shots: [
+        { id: '01', kept: true, label: 'Front cover' },
+        { id: '05', req: true, label: 'Spine, square on', gate: 'Can you read the lettering at the foot?',
+          tip: '📸 The spine, square on · top to foot · flash off' },
+        { id: '03', req: true, label: 'Back cover', gate: 'Is the whole back in the photo, with no glare?',
+          tip: '📸 The whole back cover, square on · no glare' },
+        { id: '16', req: true, label: 'Page edges: top and side together, book closed', gate: 'Can you see both edges?',
+          tip: '📸 Book closed · the top and side edges together, at an angle' },
+      ] },
+      { head: 'Book open flat', shots: [
+        { id: '11', req: true, label: 'Title page, the whole page', gate: 'Can you read the smallest print?',
+          tip: '📸 Open flat at the title page · the whole page, square on' },
+        { id: '12', kept: true, label: 'Copyright page' },
+        { id: '27', req: true, check: true, label: 'Copyright page again, the whole page', gate: 'Can you read the number line?',
+          tip: '📸 The copyright page again · the whole page, square on · flash off' },
+      ] },
+      { head: 'How good is the book?', grades: true, shots: [] },
+      { head: 'Optional', optional: true, words: true, shots: [
+        { id: '07', label: 'Cover corner or barcode panel, close up', gate: 'Can you read the small print in the corner?',
+          tip: '📸 Close up on the corner of the cover, or the barcode panel' },
+        { id: '14', label: 'Colophon or limitation page', gate: 'Can you read the smallest print?',
+          tip: '📸 The colophon or limitation page · the whole page' },
+        { id: '15', label: 'Signature or inscription', gate: 'Can you read the writing?',
+          tip: '📸 The signature or inscription, close enough to read' },
+        { id: '17', torch: true, label: 'Gutter: look down into the middle of the open book', gate: 'Can you see down into the gutter?',
+          tip: '📸 Open in the middle · look down into the gutter · torch on' },
+        { id: '23', label: 'Anything else your curator should see', gate: 'Is it sharp?',
+          tip: '📸 Anything else your curator should see' },
+      ] },
+    ],
+  },
+};
+// Every shot of a template, flat, in handling order (kept entries included).
+function fullShotList(t) {
+  const T = FULL_TEMPLATES[t];
+  return T ? T.groups.reduce((a, g) => a.concat(g.shots), []) : [];
+}
+// A shot's entry under this template, else under the other one (a photo taken
+// before "This book is different" keeps its label).
+function fullShotDef(t, id) {
+  return fullShotList(t).find(s => s.id === id) ||
+    Object.keys(FULL_TEMPLATES).map(k => fullShotList(k).find(s => s.id === id)).find(Boolean) || null;
+}
+// The new required photos a template asks for (the "Whole book - N photos" count).
+function fullRequiredCount(t) { return fullShotList(t).filter(s => s.req).length; }
 
 /* ---------- IndexedDB ---------- */
 let _db = null;
@@ -340,10 +510,15 @@ async function finishShelf(sh) {
 
 /* ---------- camera ---------- */
 let stream = null, track = null, imageCapture = null, curFrame = null;   // curFrame: frame number being re-shot, else null
+// The torch, as in the vinyl app (torchOn, #btnTorch): offered only on a whole-book
+// shot; torchWant is whether it starts on for the shot being opened (20 and 17).
+let torchOn = false, torchWant = false;
 // What the camera, the gate and the viewer are working on: a shelf frame
 // (curShelf, curFrame) or a book shot (curBook, capT.shot).
 let capT = { kind: 'shelf' };
-function capBack() { return capT.kind === 'book' ? openBookCamera(capT.shot) : openCamera(curFrame); }
+function capBack() {
+  return capT.kind === 'book' ? openBookCamera(capT.shot) : capT.kind === 'full' ? openFullCamera(capT.shot) : openCamera(curFrame);
+}
 async function openCamera(frameNo) {
   capT = { kind: 'shelf' };
   curFrame = frameNo || null;
@@ -381,6 +556,7 @@ async function openBookCamera(shotId) {
 }
 async function startCam() {
   stopCam();
+  $('#btnTorch').classList.add('hidden');
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     return camFail('The camera needs a secure (https) address. You can still import a photo taken with the camera app.');
   }
@@ -398,8 +574,14 @@ async function startCam() {
   track = stream.getVideoTracks()[0];
   imageCapture = ('ImageCapture' in window) ? new ImageCapture(track) : null;
   const caps = track.getCapabilities ? track.getCapabilities() : {};
-  // Flash off, always: a shelf photo with the torch on is a row of glare.
-  if (caps.torch) track.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {});
+  // Flash off for a shelf and a spot-check: a shelf photo with the torch on is a row
+  // of glare. A whole-book shot offers the torch, on at the start where the shot
+  // needs raking light.
+  const torchOk = !!caps.torch && capT.kind === 'full';
+  $('#btnTorch').classList.toggle('hidden', !torchOk);
+  torchOn = torchOk && torchWant;
+  $('#btnTorch').classList.toggle('on', torchOn);
+  if (caps.torch) track.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(() => {});
   const zoomEl = $('#zoom');
   if (caps.zoom && caps.zoom.max > caps.zoom.min) {
     zoomEl.min = caps.zoom.min;
@@ -438,6 +620,11 @@ $('#zoom').oninput = e => {
   if (track) track.applyConstraints({ advanced: [{ zoom: Number(e.target.value) }] }).catch(() => {});
 };
 $('#zoom').onchange = () => refocus();
+$('#btnTorch').onclick = () => {
+  torchOn = !torchOn;
+  $('#btnTorch').classList.toggle('on', torchOn);
+  if (track) track.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(() => {});
+};
 $('#btnSnap').onclick = snap;
 $('#btnImport').onclick = () => $('#fileInput').click();
 $('#btnImport2').onclick = () => $('#fileInput').click();
@@ -570,8 +757,9 @@ function openGate(bmp) {
   freeGate();
   gate.bmp = bmp;
   gate.loupe = { x: bmp.width / 2, y: bmp.height / 2 };
-  const s = capT.kind === 'book' ? BOOK_SHOTS.find(x => x.id === capT.shot) : null;
-  $('#gatePrompt').textContent = s ? s.gate : SHELF_GATE;
+  const s = capT.kind === 'book' ? BOOK_SHOTS.find(x => x.id === capT.shot)
+    : capT.kind === 'full' && curBook ? fullShotDef(curBook.template, capT.shot) : null;
+  $('#gatePrompt').textContent = s && s.gate ? s.gate : SHELF_GATE;
   show('scr-gate', { title: 'Can you read it?', back: capBack });
   layoutGate();
 }
@@ -673,6 +861,7 @@ async function keepFrame() {
     const bmp = gate.bmp;
     const blob = await gateJpeg(bmp);
     if (capT.kind === 'book') return await keepBookShot(capT.shot, bmp, blob);
+    if (capT.kind === 'full') return await keepFullShot(capT.shot, bmp, blob);
     const photos = await photosFor(curShelf.id);
     const n = curFrame || (photos.length ? photos[photos.length - 1].n + 1 : 1);
     await dbPut('photos', { shelfId: curShelf.id, n, blob, w: bmp.width, h: bmp.height, when: Date.now() });
@@ -697,6 +886,18 @@ function openViewer(p) {
   if (viewerUrl) URL.revokeObjectURL(viewerUrl);
   viewerUrl = URL.createObjectURL(p.blob);
   $('#viewerImg').src = viewerUrl;
+  // A photo sent at spot-check is shown, never re-shot or deleted here (locked).
+  $('#btnVRetake').classList.toggle('hidden', !!p.locked);
+  $('#btnVDelete').classList.toggle('hidden', !!p.locked);
+  if (p.shotId && curBook && curBook.full) {
+    const s = fullShotDef(curBook.template, p.shotId) || { label: '' };
+    const name = FULL_NAMES[p.shotId] || s.label;
+    $('#viewerName').textContent = `${curBook.title} · ${p.shotId} ${name} · ${p.w}×${p.h}`;
+    $('#btnVRetake').textContent = 'Re-shoot this photo';
+    $('#btnVDelete').textContent = 'Delete this photo';
+    show('scr-viewer', { title: `${p.shotId} ${name}`, back: backToFull });
+    return;
+  }
   if (p.shotId) {
     const s = BOOK_SHOTS.find(x => x.id === p.shotId) || { name: '' };
     $('#viewerName').textContent = `${curBook.title} · ${p.shotId} ${s.name} · ${p.w}×${p.h}`;
@@ -710,8 +911,20 @@ function openViewer(p) {
   $('#btnVDelete').textContent = 'Delete this frame';
   show('scr-viewer', { title: `Frame ${p.n}`, back: backToShelf });
 }
-$('#btnVRetake').onclick = () => viewPhoto.shotId ? openBookCamera(viewPhoto.shotId) : openCamera(viewPhoto.n);
+$('#btnVRetake').onclick = () => {
+  if (viewPhoto.locked) return;
+  if (viewPhoto.shotId && curBook && curBook.full) return openFullCamera(viewPhoto.shotId);
+  return viewPhoto.shotId ? openBookCamera(viewPhoto.shotId) : openCamera(viewPhoto.n);
+};
 $('#btnVDelete').onclick = async () => {
+  if (viewPhoto.locked) return;
+  if (viewPhoto.shotId && curBook && curBook.full) {
+    if (!fullEditable(curBook)) return toast('Wait for the upload to finish');
+    if (!confirm('Delete this photo?')) return;
+    await dbDel('shots', [curBook.id, viewPhoto.shotId]);
+    await fullChanged(curBook);
+    return backToFull();
+  }
   if (viewPhoto.shotId) {
     if (!confirm('Delete this photo?')) return;
     await dbDel('shots', [curBook.id, viewPhoto.shotId]);
@@ -899,8 +1112,28 @@ async function drive(url, opts = {}) {
     ...opts,
     headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) },
   });
-  if (!res.ok) throw new Error('Drive error ' + res.status + ': ' + (await res.text()).slice(0, 200));
+  if (!res.ok) throw await driveError(res);
   return res.json();
+}
+// The message is the one every caller has always read ("Drive error 403: ..."); the
+// status and the whole body ride along, so a full Drive can be told apart.
+async function driveError(res) {
+  const body = await res.text();
+  const e = new Error('Drive error ' + res.status + ': ' + body.slice(0, 200));
+  e.status = res.status;
+  e.body = body;
+  return e;
+}
+// The same call, for a file's own contents (alt=media): the text exactly as stored.
+async function driveText(url) {
+  const token = await getToken();
+  const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+  if (!res.ok) throw await driveError(res);
+  return res.text();
+}
+// Drive's answer when her storage is full (403, reason storageQuotaExceeded).
+function driveIsFull(e) {
+  return !!e && e.status === 403 && /storageQuotaExceeded|storage quota/i.test(String(e.body || e.message || ''));
 }
 function qEsc(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 async function findFolder(name, parent) {
@@ -1171,7 +1404,7 @@ async function pumpUploads() {
         break;
       }
       const sh = queue[0];
-      await (sh.kind === 'book' ? uploadBook(sh) : uploadShelf(sh));
+      await (sh.kind === 'book' ? (sh.full ? uploadFull(sh) : uploadBook(sh)) : uploadShelf(sh));
       if (sh.upload && sh.upload.state === 'paused') break;
     }
   } finally {
@@ -1364,6 +1597,10 @@ function refreshUploadCards() {
     const bk = curBook;
     shotsFor(bk.id).then(shots => { if (curBook === bk) paintBookUpload(bk, bookReady(shots)); });
   }
+  if ($('#scr-full').classList.contains('active') && curBook && curBook.full) {
+    const bk = curBook;
+    shotsFor(bk.id).then(shots => { if (curBook === bk) paintFullUpload(bk, fullTally(bk, shots)); });
+  }
   if (!$('#scr-home').classList.contains('active')) return;
   (async () => {
     const shelves = await dbAll('shelves'), books = await dbAll('books');
@@ -1449,6 +1686,10 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { pu
 const REQ_URL_RE = /^https:\/\/script\.google\.com\/macros\/s\/[-\w]+\/exec$/;
 const REQ_KEY_RE = /^[A-Za-z0-9_-]{25,100}$/;
 const REQ_RID_RE = /^R\d{4,6}-[A-HJ-NP-Z2-9]{4}$/;
+// The kinds of request this version of the app can answer. The request service
+// serves any other kind only to an app that names it (an older app never sees a
+// Full capture, so it can never answer one as a two-photo spot-check).
+const REQ_TYPES = ['Spot-check', 'Full capture'];
 let reqLastTry = 0, reqBusy = false, reqObjUrl = null;
 function requestsUrl() { const u = cred('requestsUrl'); return REQ_URL_RE.test(u) ? u : ''; }
 async function heldIds() { return (await dbGet('kv', 'heldIds')) || {}; }
@@ -1500,7 +1741,7 @@ async function refreshRequests({ force = false } = {}) {
     if (!ids.length) { await dbPut('kv', { items: [], fetchedAt: Date.now(), build: '', lastError: '' }, 'requests'); return; }
     let rep = null;
     for (let a = 1; a <= 3; a++) {
-      rep = await requestsPost({ op: 'list', v: 1, ids });
+      rep = await requestsPost({ op: 'list', v: 1, ids, types: REQ_TYPES });
       if (rep && rep.ok === true && Array.isArray(rep.items)) break;
       rep = null;
       if (a < 3) await new Promise(r => setTimeout(r, 1500 * a));
@@ -1521,9 +1762,11 @@ async function refreshRequests({ force = false } = {}) {
 // "Seen" once per request, recorded only when the service confirms it.
 async function markSeen(ids, items) {
   const seen = (await dbGet('kv', 'requestsSeen')) || {};
-  const rids = items.map(i => i.rid).filter(r => !seen[r]).slice(0, 500);
+  // A kind of request this app cannot answer is shown (asking for the newest app),
+  // never reported as seen.
+  const rids = items.filter(i => reqKind(i) !== 'other').map(i => i.rid).filter(r => !seen[r]).slice(0, 500);
   if (!rids.length) return;
-  const rep = await requestsPost({ op: 'seen', v: 1, ids, rids });
+  const rep = await requestsPost({ op: 'seen', v: 1, ids, rids, types: REQ_TYPES });
   if (!rep || rep.ok !== true) return;
   for (const r of [].concat(rep.stamped || [], rep.already || [])) if (rids.indexOf(r) >= 0) seen[r] = Date.now();
   await dbPut('kv', seen, 'requestsSeen');
@@ -1536,7 +1779,24 @@ function reqState(it, answered, books = {}) {
   const bk = a && a.bookId ? books[a.bookId] : null;
   if (bk && bk.upload) return { key: 'shot', text: uploadLabel(bk) };
   if (a && a.ready) return { key: 'shot', text: 'Photographed - waiting to upload' };
+  const kind = reqKind(it);
+  if (kind === 'other') return { key: 'todo', text: FULL_WORDS.needUpdate };
+  if (kind === 'full' && bk && bk.full && bk.progress && bk.progress.started)
+    return { key: 'todo', text: FULL_WORDS.progress(bk.progress.done, bk.progress.total) };
   return { key: 'todo', text: 'To do' };
+}
+// What a request asks for: 'spot' (blank Type counts as Spot-check), 'full' (a
+// Full capture whose template this app knows), or 'other' (this app cannot answer it).
+function reqKind(it) {
+  const t = String(it && it.type || '').trim();
+  if (!t || t === 'Spot-check') return 'spot';
+  if (t === 'Full capture' && FULL_TEMPLATES[it.template]) return 'full';
+  return 'other';
+}
+// The line under the title on the list: how many photos the request asks for.
+function reqKindLine(it) {
+  const k = reqKind(it);
+  return k === 'spot' ? FULL_WORDS.twoPhotos : k === 'full' ? FULL_WORDS.wholeBook(fullRequiredCount(it.template)) : '';
 }
 async function renderReqCard() {
   const card = $('#reqCard');
@@ -1588,7 +1848,9 @@ async function openRequests() {
     const row = document.createElement('button');
     row.className = 'reqitem ' + st.key;
     row.dataset.rid = it.rid;
+    const kl = reqKindLine(it);
     row.innerHTML = `<div class="rq-t">${esc(it.title || '(no title)')}</div><div class="rq-a">${esc(it.author || '')}</div>` +
+      (kl ? `<div class="rq-k">${esc(kl)}</div>` : '') +
       `<div class="rq-w">${esc(it.where || '')}</div><div class="rq-s">${esc(st.text)}</div>`;
     row.onclick = () => openRequest(it.rid);
     list.appendChild(row);
@@ -1600,6 +1862,15 @@ async function openRequests() {
     const row = document.createElement('div');
     row.className = 'reqitem started';
     row.dataset.book = bk.id;
+    if (bk.full) {
+      // Filed, withdrawn or closed: nothing more goes up for it (scope §2.3).
+      row.innerHTML = `<div class="rq-t">${esc(bk.title || '(no title)')}</div><div class="rq-a">${esc(bk.author || '')}</div>` +
+        `<div class="rq-s">${esc(bk.upload && bk.upload.state === 'uploading' ? uploadLabel(bk) : FULL_WORDS.closed)}</div>` +
+        '<div class="row2" style="margin-top:10px"><button class="secondary danger st-del">Delete</button></div>';
+      row.querySelector('.st-del').onclick = () => deleteBook(bk.id, () => openRequests());
+      list.appendChild(row);
+      continue;
+    }
     row.innerHTML = `<div class="rq-t">${esc(bk.title || '(no title)')}</div><div class="rq-a">${esc(bk.author || '')}</div>` +
       `<div class="rq-s">${esc(bk.upload ? uploadLabel(bk) : 'Upload it if both photos were taken; otherwise delete it.')}</div>` +
       '<div class="row2" style="margin-top:10px"><button class="secondary st-up">☁ Upload</button><button class="secondary danger st-del">Delete</button></div>';
@@ -1612,7 +1883,18 @@ async function openRequests() {
   }
 }
 $('#btnReqCheck').onclick = async () => { $('#rqsStatus').textContent = 'Checking…'; await refreshRequests({ force: true }); openRequests(); };
-function reqFreeUrl() { if (reqObjUrl) { URL.revokeObjectURL(reqObjUrl); reqObjUrl = null; } }
+function reqFreeUrl() {
+  if (reqObjUrl) { URL.revokeObjectURL(reqObjUrl); reqObjUrl = null; }
+  if (reqPrevUrl) { URL.revokeObjectURL(reqPrevUrl); reqPrevUrl = null; }
+}
+let reqPrevUrl = null;
+// The spot-check answer this phone sent for a book, if it still holds it: the
+// record whose folder is the request's folder, else the one for the same Book ID.
+async function spotRecordFor(it) {
+  const spot = (await dbAll('books')).filter(b => !b.full);
+  return spot.find(b => it.folderId && b.driveFolderId === it.folderId) ||
+    spot.find(b => it.bookId && b.requestBookId === it.bookId) || null;
+}
 // One request: the words, and the spine marked on this phone's own shelf photo
 // (never drawn on a photo retaken after the curator saw it).
 async function openRequest(rid) {
@@ -1629,6 +1911,25 @@ async function openRequest(rid) {
   const wrap = $('#rqPhoto'), note = $('#rqNote');
   wrap.innerHTML = '';
   note.textContent = '';
+  // What kind of request: a spot-check reads exactly as before; a whole book names
+  // its template and shows the jacket front sent earlier; anything else asks for
+  // the newest app.
+  const kind = reqKind(it), shootBtn = $('#btnRqShoot'), kindEl = $('#rqKind'), prev = $('#rqPrev');
+  shootBtn.disabled = false;
+  shootBtn.classList.toggle('hidden', kind === 'other');
+  shootBtn.textContent = kind === 'full' ? FULL_WORDS.shoot : 'Photograph this book';
+  kindEl.textContent = kind === 'full' ? FULL_WORDS.templates[it.template] : '';
+  kindEl.classList.toggle('hidden', kind !== 'full');
+  prev.innerHTML = '';
+  if (kind === 'other') { note.textContent = FULL_WORDS.needUpdate; return; }
+  if (kind === 'full') {
+    const sp = await spotRecordFor(it);
+    const p01 = sp ? (await shotsFor(sp.id)).find(x => x.shotId === '01' && x.blob) : null;
+    if (p01) {
+      reqPrevUrl = URL.createObjectURL(p01.blob);
+      prev.innerHTML = `<img class="rq-prev" alt="01" src="${reqPrevUrl}"><span class="hint">01 · ${esc(FULL_WORDS.sentEarlier)}</span>`;
+    }
+  }
   const box = it.box && typeof it.box === 'object' ? it.box : null;
   let photo = null;
   if (box && box.file) {
@@ -1689,6 +1990,11 @@ function bookReady(shots) { return BOOK_SHOTS.every(s => shots.some(x => x.shotI
 async function openBookFromRequest(rid) {
   const c = (await dbGet('kv', 'requests')) || { items: [] };
   const it = (c.items || []).find(x => x.rid === rid);
+  // By the request's type: a Full capture opens the whole-book checklist; a kind
+  // this app does not know is never answered as a two-photo spot-check.
+  const kind = it ? reqKind(it) : 'spot';
+  if (kind === 'full') return openFullFromRequest(rid);
+  if (kind === 'other') { toast(FULL_WORDS.needUpdate, 6000); return; }
   const a = (await answeredMap())[rid];
   let bk = a && a.bookId ? await dbGet('books', a.bookId) : null;
   if (!bk && !it) return openRequests();
@@ -1865,6 +2171,703 @@ async function queueBook(bk) {
   await dbPut('books', bk);
   if (curBook && curBook.id === bk.id) curBook = bk;
   return true;
+}
+
+/* ---------- the whole book: a Full capture request ----------
+ * The curator asks for the rest of a book whose two spot-check photos are filed.
+ * The request names that book's own answer folder; the phone checks it by id
+ * (root, bin, the row's Book ID in its book.json, 01 and 12 listed) before
+ * anything else and never makes a folder (never bookFolderFor). 01 and 12 stay
+ * locked: shown as "Sent earlier", never sent again. New files sit beside the
+ * old ones under the folder's own filing words (rule 2). book.json goes last,
+ * with the spot-check record kept whole beside it (book.spot.json) and in
+ * `previous`. One record per request on this phone, pointed at from answered[rid].
+ */
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
+const DRIVE_LIST = 'https://www.googleapis.com/drive/v3/files';
+const SPOT_JSON = 'book.spot.json';
+const ASIDE_PREFIX = '_not this book ';
+let fullThumbs = [];
+
+function fullGone(why) { const e = new Error(FULL_WORDS.folderGone); e.fullGone = true; e.why = why; return e; }
+// The filing words: the text before " - 01 " in the 01 file the folder's book.json
+// lists (the last " - 01 ", so a title that starts with a number reads right).
+function filingWordsOf(file) {
+  const f = String(file || '');
+  const i = f.lastIndexOf(' - 01 ');
+  if (i <= 0 || !/\.jpg$/i.test(f)) return '';
+  const w = f.slice(0, i);
+  return /[\\/]/.test(w) || !w.trim() ? '' : w;
+}
+// Every file a manifest lists, photos and texts.
+function listedNames(m) {
+  if (!m || typeof m !== 'object') return [];
+  return [].concat(Array.isArray(m.photos) ? m.photos : [], Array.isArray(m.texts) ? m.texts : [])
+    .map(p => p && typeof p.file === 'string' ? p.file : '').filter(Boolean);
+}
+function localDay() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+// The folder the request names: it opens with her sign-in and is not in the bin;
+// it sits in the root found from the shelf's own folder (by id, never the name in
+// Settings); its one book.json names this row (requestBookId) and lists 01 and 12.
+// Any failure is "can't open this book's folder": nothing written, no folder made.
+async function fullFolderCheck(ref) {
+  const fid = String(ref.folderId || '');
+  if (!REQ_KEY_RE.test(fid) || !ref.bookId) throw fullGone('no folder id');
+  let root;
+  try { root = await requestRootFolder(ref.shelfFolderId); }
+  catch (e) { if (String(e && e.message) === SHELF_GONE) throw fullGone('shelf root'); throw e; }
+  let f;
+  try { f = await drive(DRIVE_FILES + encodeURIComponent(fid) + '?fields=id,name,mimeType,parents,trashed'); }
+  catch (e) { if (/Drive error (403|404)/.test(String(e.message))) throw fullGone('folder'); throw e; }
+  if (!f || f.id !== fid || f.trashed || f.mimeType !== FOLDER_MIME || !Array.isArray(f.parents) ||
+      f.parents.length !== 1 || f.parents[0] !== root.id) throw fullGone('folder place');
+  const q = `name='book.json' and '${fid}' in parents and trashed=false`;
+  const r = await drive(DRIVE_LIST + '?q=' + encodeURIComponent(q) + '&fields=files(id,name)');
+  const hits = (r && r.files) || [];
+  if (hits.length !== 1) throw fullGone('book.json count ' + hits.length);
+  let text;
+  try { text = await driveText(DRIVE_FILES + encodeURIComponent(hits[0].id) + '?alt=media'); }
+  catch (e) { if (/Drive error (403|404)/.test(String(e.message))) throw fullGone('book.json read'); throw e; }
+  let m = null;
+  try { m = JSON.parse(text); } catch (e) { m = null; }
+  if (!m || typeof m !== 'object' || Array.isArray(m) || m.bookCurator !== 1 || m.kind !== 'book') throw fullGone('not a book');
+  if (String(m.requestBookId || '') !== String(ref.bookId)) throw fullGone('another row');
+  const photos = Array.isArray(m.photos) ? m.photos.filter(p => p && typeof p === 'object') : [];
+  const kept = {};
+  for (const id of FULL_KEPT) {
+    const ps = photos.filter(p => p.shot === id);
+    if (ps.length !== 1 || typeof ps[0].file !== 'string' || !ps[0].file) throw fullGone('no ' + id);
+    kept[id] = { file: ps[0].file, w: ps[0].w == null ? null : ps[0].w, h: ps[0].h == null ? null : ps[0].h };
+  }
+  const words = filingWordsOf(kept['01'].file);
+  if (!words) throw fullGone('filing words');
+  return { root, folder: { id: f.id, name: f.name }, book: { id: hits[0].id, text, m }, words, kept,
+    author: String(m.author || ''), title: String(m.title || '') };
+}
+// Ask once, before the first whole book, that the browser keep the photos stored
+// on this phone (a whole book is many photos, and some go up only later).
+async function askPersist() {
+  try {
+    if (!navigator.storage || !navigator.storage.persist) return;
+    if (await dbGet('kv', 'persistAsked')) return;
+    if (!(navigator.storage.persisted && await navigator.storage.persisted())) await navigator.storage.persist();
+    await dbPut('kv', Date.now(), 'persistAsked');
+  } catch (e) { /* a refusal never blocks the capture */ }
+}
+async function openFullFromRequest(rid) {
+  const c = (await dbGet('kv', 'requests')) || { items: [] };
+  const it = (c.items || []).find(x => x.rid === rid);
+  if (!it) return openRequests();
+  if (reqKind(it) !== 'full') { toast(FULL_WORDS.needUpdate, 6000); return; }
+  const a = (await answeredMap())[rid];
+  const had = a && a.bookId ? await dbGet('books', a.bookId) : null;
+  // Leaving and coming back reopens the checklist with its ticks (no network needed).
+  if (had && had.full && had.folderId === String(it.folderId || '')) { curBook = had; reqFreeUrl(); return backToFull(); }
+  const btn = $('#btnRqShoot'), note = $('#rqNote');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  let chk;
+  try {
+    if (!cred('clientId')) throw new Error('This build has no Google Client ID yet — add one in ⚙ Settings');
+    chk = await fullFolderCheck({ folderId: it.folderId, shelfFolderId: it.key, bookId: it.bookId });
+  } catch (e) {
+    console.error('full capture check', rid, (e && e.why) || e);
+    if (e && e.fullGone) note.textContent = FULL_WORDS.folderGone;
+    toast((e && e.message) || String(e), 6000);
+    btn.disabled = false;
+    btn.textContent = FULL_WORDS.shoot;
+    return;
+  }
+  await askPersist();
+  const box = it.box && typeof it.box === 'object' ? it.box : null;
+  const t = it.template;
+  const bk = {
+    id: Date.now().toString(36), kind: 'book', full: true, requestType: 'Full capture',
+    template: t, askedTemplate: t, templateWhy: '',
+    author: String(it.author || ''), title: String(it.title || ''),
+    filing: { words: chk.words, author: chk.author, title: chk.title },
+    requestId: rid, requestBookId: String(it.bookId || ''), folderId: chk.folder.id, folderName: chk.folder.name,
+    shelfRef: { shelfId: String(it.shelfId || ''), shelfFolderId: it.key, file: box ? String(box.file || '') : '',
+      box: box ? [box.x, box.y, box.w, box.h] : null, where: String(it.where || '') },
+    asked: String(it.asked || ''), note: '',
+    kept: chk.kept, skipped: {}, grades: { jacket: null, book: null }, flags: { jacket: [], book: [] },
+    operator: settings.operator || '', created: Date.now(), startedAt: Date.now(), finishedAt: null,
+    sent: {}, fileIds: {}, aside: null, progress: { done: 0, total: fullRequiredCount(t), started: false },
+  };
+  await dbPut('books', bk);
+  await setAnswered(rid, { bookId: bk.id, ready: false, uploaded: null });
+  curBook = bk;
+  reqFreeUrl();
+  backToFull();
+}
+// A "Can't take this one" reason: 'not-on-book', 'missing', or 'other: <typed line>'.
+function whyKey(why) { return /^other:/.test(String(why || '')) ? 'other' : String(why || ''); }
+function whyText(why) { return String(why || '').replace(/^other: ?/, ''); }
+function fullSkipOk(why) { const k = whyKey(why); return k === 'other' ? !!whyText(why).trim() : !!FULL_WORDS.cantWhy[k]; }
+// Required entries done (taken, or marked can't with a reason), and the grades.
+function fullTally(bk, shots) {
+  const T = FULL_TEMPLATES[bk.template];
+  const req = fullShotList(bk.template).filter(s => s.req);
+  const sk = bk.skipped || {};
+  const got = id => shots.some(x => x.shotId === id && x.blob);
+  const done = req.filter(s => got(s.id) || fullSkipOk(sk[s.id])).length;
+  const g = bk.grades || {};
+  const gradesOk = !!T && T.grades.every(k => g[k] != null);
+  const started = shots.some(x => x.blob) || req.some(s => sk[s.id]);
+  return { done, total: req.length, gradesOk, ready: !!T && done === req.length && gradesOk, started };
+}
+// May the book be changed now? Not while it is queued or going up.
+function fullEditable(bk) { return !!bk && !(uploadActive(bk) && bk.upload.state !== 'paused'); }
+// Anything kept, deleted, marked or chosen: the book is no longer what was sent.
+// The upload's own bookkeeping is taken from the stored record first, so a screen
+// that was open while files went up never writes back an older copy of it.
+async function fullChanged(bk) {
+  const stored = await dbGet('books', bk.id);
+  if (stored) { bk.sent = stored.sent || {}; bk.fileIds = stored.fileIds || {}; bk.aside = stored.aside || null; bk.upload = stored.upload; }
+  if (!bk.upload) delete bk.upload;
+  const t = fullTally(bk, await shotsFor(bk.id));
+  bk.finishedAt = t.ready ? Date.now() : null;
+  bk.uploaded = null;
+  bk.progress = { done: t.done, total: t.total, started: t.started };
+  await dbPut('books', bk);
+  await setAnswered(bk.requestId, { bookId: bk.id, ready: t.ready, uploaded: null });
+  return t;
+}
+function backToFull() {
+  stopCam();
+  stopLevel();
+  freeGate();
+  stopVoice();
+  if (!curBook || !curBook.full) return openRequests();
+  show('scr-full', { title: 'Book', back: async () => { await leaveFull(); openRequest(curBook.requestId); } });
+  renderFull();
+}
+// The note, the copyright words and any typed "Other" reason are read off the
+// screen when it is left (dictation fills the boxes without a change event).
+async function leaveFull() {
+  stopVoice();
+  const bk = curBook;
+  if (!bk || !bk.full || !$('#scr-full').classList.contains('active') || !fullEditable(bk)) return;
+  let note = $('#inFlNote').value.trim();
+  if (note === NOTE_START.trim()) note = '';
+  const words = tidyVerbatim($('#inFlWords').value);
+  const had = (await shotsFor(bk.id)).find(x => x.shotId === FULL_TEXT.id);
+  const wordsChanged = words !== (had ? had.text || '' : '');
+  let changed = note !== (bk.note || '') || wordsChanged;
+  bk.skipped = bk.skipped || {};
+  $$('#flList .fl-other').forEach(inp => {
+    const id = inp.dataset.shot, cur = bk.skipped[id];
+    if (whyKey(cur) !== 'other') return;
+    const v = 'other: ' + inp.value.replace(/\s+/g, ' ').trim();
+    if (v !== cur) { bk.skipped[id] = v; changed = true; }
+  });
+  if (!changed) return;
+  bk.note = note;
+  if (wordsChanged) {
+    if (words) await dbPut('shots', { bookId: bk.id, shotId: FULL_TEXT.id, text: words, when: Date.now() });
+    else if (had) await dbDel('shots', [bk.id, FULL_TEXT.id]);
+  }
+  await fullChanged(bk);
+}
+async function renderFull() {
+  const bk = curBook;
+  if (!bk || !bk.full) return;
+  const shots = await shotsFor(bk.id);
+  const spot = await spotRecordFor({ folderId: bk.folderId, bookId: bk.requestBookId });
+  const spotShots = spot ? await shotsFor(spot.id) : [];
+  if (curBook !== bk || !$('#scr-full').classList.contains('active')) return;
+  fullThumbs.forEach(u => URL.revokeObjectURL(u));
+  fullThumbs = [];
+  $('#flTitle').textContent = bk.title || '(no title)';
+  $('#flAuthor').textContent = bk.author ? 'by ' + bk.author : '';
+  $('#flWhere').textContent = (bk.shelfRef && bk.shelfRef.where) || '';
+  $('#flAsked').textContent = bk.asked || '';
+  $('#flAsked').classList.toggle('hidden', !bk.asked);
+  $('#inFlNote').value = bk.note || '';
+  $('#flNoteWrap').classList.toggle('hidden', !bk.note);
+  $('#btnFlDifferent').classList.toggle('hidden', !!bk.note);
+  $('#flKind').textContent = FULL_WORDS.templates[bk.template] || '';
+  $('#btnFlSwitch').textContent = FULL_WORDS.different;
+  $('#flSwitch').classList.add('hidden');
+  const T = FULL_TEMPLATES[bk.template];
+  const list = $('#flList');
+  list.innerHTML = '';
+  for (const g of T.groups) {
+    if (g.optional) { const hr = document.createElement('hr'); hr.className = 'fl-line'; list.appendChild(hr); }
+    const h = document.createElement('h2');
+    h.className = 'sect';
+    h.textContent = g.optional ? FULL_WORDS.optional : g.head;
+    list.appendChild(h);
+    for (const s of g.shots) list.appendChild(fullShotRow(bk, s, shots, spotShots));
+    if (g.grades) for (const k of T.grades) list.appendChild(fullGradeBox(bk, k));
+  }
+  // Photos taken before "This book is different" that the new list does not ask
+  // for: kept, and sent with the rest (the curator can leave one out).
+  const inT = new Set(fullShotList(bk.template).map(s => s.id));
+  const extra = $('#flExtra');
+  extra.innerHTML = '';
+  const extras = shots.filter(x => x.blob && !inT.has(x.shotId) && FULL_NAMES[x.shotId]);
+  if (extras.length) {
+    const h = document.createElement('h2');
+    h.className = 'sect';
+    h.textContent = FULL_WORDS.alsoTaken;
+    extra.appendChild(h);
+    for (const x of extras) extra.appendChild(fullShotRow(bk, fullShotDef(bk.template, x.shotId), shots, spotShots, true));
+  }
+  const words = shots.find(x => x.shotId === FULL_TEXT.id);
+  $('#inFlWords').value = words ? words.text || '' : '';
+  $('#btnFlWordsVoice').classList.toggle('hidden', !SpeechRec);
+  $('#btnFlNoteVoice').classList.toggle('hidden', !SpeechRec);
+  $('#flKeepOpen').textContent = FULL_WORDS.keepOpen;
+  paintFullUpload(bk, fullTally(bk, shots));
+}
+// One line of the checklist: a kept shot (Sent earlier, locked), or a shot to take,
+// with "Can't take this one" on a required one.
+function fullShotRow(bk, s, shots, spotShots, extra) {
+  const row = document.createElement('div');
+  row.dataset.shot = s.id;
+  if (s.kept) {
+    const held = spotShots.find(x => x.shotId === s.id && x.blob);
+    row.className = 'bkshot got kept';
+    let thumb = '<span class="bk-thumb empty">✓</span>';
+    if (held) { const u = URL.createObjectURL(held.blob); fullThumbs.push(u); thumb = `<img class="bk-thumb" alt="${esc(s.id)}" src="${u}">`; }
+    row.innerHTML = `<button class="bk-view" aria-label="View ${esc(s.id)}">${thumb}</button>` +
+      `<div class="bk-body"><div class="bk-name">${esc(s.id)} ${esc(s.label)}</div>` +
+      `<div class="fl-kept">✓ ${esc(FULL_WORDS.sentEarlier)}</div></div>`;
+    row.querySelector('.bk-view').onclick = () => { if (held) openViewer({ ...held, locked: true }); };
+    return row;
+  }
+  const got = shots.find(x => x.shotId === s.id && x.blob);
+  const why = extra ? '' : (bk.skipped || {})[s.id] || '';
+  const wk = whyKey(why);
+  row.className = 'bkshot' + (got ? ' got' : fullSkipOk(why) ? ' got skip' : '');
+  let thumb = '<span class="bk-thumb empty">📷</span>';
+  if (got) { const u = URL.createObjectURL(got.thumb || got.blob); fullThumbs.push(u); thumb = `<img class="bk-thumb" alt="${esc(s.id)}" src="${u}">`; }
+  else if (fullSkipOk(why)) thumb = '<span class="bk-thumb empty">–</span>';
+  const label = s.check ? `${s.label}: ${FULL_WORDS.checkLine}` : s.label;
+  let html = `<button class="bk-view" aria-label="${got ? 'View' : 'Take'} ${esc(s.id)}">${thumb}</button>` +
+    `<div class="bk-body"><div class="bk-name">${s.req && !extra ? '<span class="bk-req">●</span> ' : ''}${esc(s.id)} ${esc(label)}</div>` +
+    `<button class="bk-take">${got ? 'Re-shoot' : '📷 Take this photo'}</button>`;
+  if (s.req && !got && !extra) {
+    html += `<button class="linkbtn fl-cant">${esc(FULL_WORDS.cant)}${wk ? ': ' + esc(FULL_WORDS.cantWhy[wk] || '') : ''}</button>` +
+      `<div class="chips fl-why${wk ? '' : ' hidden'}">` +
+      Object.keys(FULL_WORDS.cantWhy).map(k => `<button class="chip${wk === k ? ' on' : ''}" data-why="${k}">${esc(FULL_WORDS.cantWhy[k])}</button>`).join('') +
+      '</div>' +
+      `<input type="text" class="fl-other${wk === 'other' ? '' : ' hidden'}" data-shot="${esc(s.id)}" autocomplete="off" autocapitalize="sentences" placeholder="${esc(FULL_WORDS.cantOther)}">`;
+  }
+  row.innerHTML = html + '</div>';
+  row.querySelector('.bk-take').onclick = () => openFullCamera(s.id);
+  row.querySelector('.bk-view').onclick = () => got ? openViewer(got) : openFullCamera(s.id);
+  const cant = row.querySelector('.fl-cant');
+  if (cant) {
+    const other = row.querySelector('.fl-other');
+    other.value = whyText(why);
+    cant.onclick = () => row.querySelector('.fl-why').classList.toggle('hidden');
+    row.querySelectorAll('.fl-why .chip').forEach(c => c.onclick = () => fullSetSkip(s.id, c.dataset.why, other.value));
+    other.onchange = () => { if (whyKey((curBook.skipped || {})[s.id]) === 'other') fullSetSkip(s.id, 'other', other.value, true); };
+  }
+  return row;
+}
+// Mark a required shot "can't take", with its reason; the same chip again clears it.
+async function fullSetSkip(id, k, typed, keep) {
+  const bk = curBook;
+  if (!fullEditable(bk)) return toast('Wait for the upload to finish');
+  await leaveFull();
+  bk.skipped = bk.skipped || {};
+  if (!keep && whyKey(bk.skipped[id]) === k) delete bk.skipped[id];
+  else bk.skipped[id] = k === 'other' ? 'other: ' + String(typed || '').replace(/\s+/g, ' ').trim() : k;
+  await fullChanged(bk);
+  await renderFull();
+  if (k === 'other' && bk.skipped[id]) {
+    const inp = $(`#flList .fl-other[data-shot="${id}"]`);
+    if (inp && !inp.value) inp.focus();
+  }
+}
+// A grade picker (F20: one plain line per grade, plus Not sure) and its flag chips.
+function fullGradeBox(bk, k) {
+  const box = document.createElement('div');
+  box.className = 'fl-grade';
+  box.dataset.grade = k;
+  const cur = (bk.grades || {})[k];
+  const opts = FULL_GRADES.map(g => `<button class="grow${cur === g ? ' on' : ''}" data-g="${esc(g)}"><b>${esc(g)}</b><span>${esc(FULL_WORDS.gradeLines[g])}</span></button>`).join('') +
+    `<button class="grow${cur === '' ? ' on' : ''}" data-g=""><b>${esc(FULL_WORDS.notSure)}</b><span>${esc(FULL_WORDS.notSureLine)}</span></button>`;
+  const flags = FULL_FLAGS[k].map(f => `<button class="chip${((bk.flags || {})[k] || []).includes(f) ? ' on' : ''}" data-flag="${esc(f)}">${esc(f)}</button>`).join('');
+  box.innerHTML = `<div class="fl-ghead">${esc(FULL_WORDS.gradeHeads[k])}</div><div class="grows">${opts}</div><div class="chips fl-flags">${flags}</div>`;
+  box.querySelectorAll('.grow').forEach(b => b.onclick = () => fullSetGrade(k, b.dataset.g));
+  box.querySelectorAll('.fl-flags .chip').forEach(c => c.onclick = () => fullToggleFlag(k, c.dataset.flag));
+  return box;
+}
+async function fullSetGrade(k, g) {
+  const bk = curBook;
+  if (!fullEditable(bk)) return toast('Wait for the upload to finish');
+  if (g !== '' && FULL_GRADES.indexOf(g) < 0) return;
+  await leaveFull();
+  bk.grades = { ...(bk.grades || {}), [k]: g };
+  await fullChanged(bk);
+  renderFull();
+}
+async function fullToggleFlag(k, f) {
+  const bk = curBook;
+  if (!fullEditable(bk)) return toast('Wait for the upload to finish');
+  if (FULL_FLAGS[k].indexOf(f) < 0) return;
+  await leaveFull();
+  const set = new Set(((bk.flags || {})[k]) || []);
+  if (set.has(f)) set.delete(f); else set.add(f);
+  bk.flags = { ...(bk.flags || {}), [k]: FULL_FLAGS[k].filter(x => set.has(x)) };
+  await fullChanged(bk);
+  renderFull();
+}
+// "This book is different": the other list, with a reason. Every photo is kept;
+// one file name per shot number, so a switch never leaves two files for a shot.
+$('#btnFlSwitch').onclick = () => {
+  const bk = curBook;
+  if (!bk || !bk.full) return;
+  if (!fullEditable(bk)) return toast('Wait for the upload to finish');
+  const to = bk.template === 'hc' ? 'pb' : 'hc';
+  const panel = $('#flSwitch');
+  panel.dataset.to = to;
+  panel.dataset.why = '';
+  $('#flSwitchQ').textContent = FULL_WORDS.switchTo[to];
+  $('#flSwitchKeep').textContent = FULL_WORDS.switchKeep;
+  const chips = $('#flSwitchChips');
+  chips.innerHTML = [['as', FULL_WORDS.switchWhy[to]], ['other', FULL_WORDS.cantWhy.other]]
+    .map(([k, w]) => `<button class="chip" data-k="${k}">${esc(w)}</button>`).join('');
+  chips.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    panel.dataset.why = c.dataset.k;
+    chips.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === c));
+    $('#inFlSwitchOther').classList.toggle('hidden', c.dataset.k !== 'other');
+    if (c.dataset.k === 'other') $('#inFlSwitchOther').focus();
+  });
+  $('#inFlSwitchOther').value = '';
+  $('#inFlSwitchOther').placeholder = FULL_WORDS.cantOther;
+  $('#inFlSwitchOther').classList.add('hidden');
+  $('#btnFlSwitchGo').textContent = FULL_WORDS.switchGo;
+  $('#btnFlSwitchNo').textContent = FULL_WORDS.cancel;
+  panel.classList.remove('hidden');
+};
+$('#btnFlSwitchNo').onclick = () => $('#flSwitch').classList.add('hidden');
+$('#btnFlSwitchGo').onclick = async () => {
+  const bk = curBook, panel = $('#flSwitch');
+  if (!bk || !bk.full || !fullEditable(bk)) return;
+  const to = panel.dataset.to, k = panel.dataset.why;
+  const typed = $('#inFlSwitchOther').value.replace(/\s+/g, ' ').trim();
+  if (!FULL_TEMPLATES[to] || !k || (k === 'other' && !typed)) return toast(FULL_WORDS.cantOther);
+  await leaveFull();
+  bk.template = to;
+  bk.templateWhy = to === bk.askedTemplate ? '' : k === 'other' ? 'other: ' + typed : FULL_WORDS.switchWhy[to];
+  await fullChanged(bk);
+  renderFull();
+  toast(FULL_WORDS.templates[to] + ' ✓');
+};
+function paintFullUpload(bk, t) {
+  const up = uploadActive(bk), paused = !!(bk.upload && bk.upload.state === 'paused');
+  const btn = $('#btnFlUpload');
+  btn.disabled = !t.ready || (up && !paused) || !!bk.uploaded;
+  btn.textContent = paused ? '☁ Sign in to continue the upload' : up ? uploadLabel(bk) : bk.uploaded ? FULL_WORDS.sent
+    : t.done < t.total ? FULL_WORDS.progress(t.done, t.total) : '☁ Upload to Google Drive';
+  $('#flProgress').textContent = FULL_WORDS.progress(t.done, t.total);
+  const lock = up && !paused;
+  ['#inFlNote', '#inFlWords', '#btnFlNoteVoice', '#btnFlWordsVoice', '#btnFlDifferent', '#btnFlSwitch'].forEach(q => { $(q).disabled = lock; });
+  $$('#flList .grow, #flList .chip, #flList .fl-other, #flList .fl-cant').forEach(x => { x.disabled = lock; });
+  const T = FULL_TEMPLATES[bk.template];
+  $('#flStatus').textContent = bk.upload && bk.upload.state === 'failed' ? uploadLabel(bk)
+    : t.done === t.total && !t.gradesOk ? (T.grades.length > 1 ? FULL_WORDS.chooseGrades : FULL_WORDS.chooseGrade) : '';
+  $('#flKeepOpen').classList.toggle('hidden', !!bk.uploaded && !up);
+}
+// A shot of the whole book: the loupe gate as at spot-check; the torch button is
+// offered, on at the start for the shots that need raking light (20, 17).
+async function openFullCamera(shotId) {
+  const bk = curBook;
+  const s = bk && bk.full ? fullShotDef(bk.template, shotId) : null;
+  if (!s || s.kept) return bk && bk.full ? backToFull() : goHome();
+  if (!fullEditable(bk)) return toast('Wait for the upload to finish');
+  if ($('#scr-full').classList.contains('active')) await leaveFull();
+  // Capture minutes time the shooting: the clock starts when the camera first opens
+  // on this book with no photo yet.
+  if (!(await shotsFor(bk.id)).some(x => x.blob)) { bk.startedAt = Date.now(); await dbPut('books', bk); }
+  capT = { kind: 'full', shot: shotId };
+  torchWant = !!s.torch;
+  freeGate();
+  stopLevel();
+  show('scr-camera', { title: bk.title || 'Book', back: backToFull });
+  $('#camLabel').textContent = `${s.id} ${FULL_NAMES[s.id] || s.label}`;
+  $('#camTip').textContent = s.tip || '';
+  $('#camFallback').classList.add('hidden');
+  await startCam();
+}
+// A small JPEG for the checklist, made once when a shot is kept (the list never
+// decodes a full-size photo into a tile).
+function makeThumb(bmp, max = 200) {
+  const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(bmp.width * k));
+  c.height = Math.max(1, Math.round(bmp.height * k));
+  const g = c.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('thumbnail')), 'image/jpeg', 0.8));
+}
+async function keepFullShot(shotId, bmp, blob) {
+  const bk = curBook;
+  let thumb = null;
+  try { thumb = await makeThumb(bmp); } catch (e) { thumb = null; }
+  await dbPut('shots', { bookId: bk.id, shotId, blob, thumb, w: bmp.width, h: bmp.height, when: Date.now() });
+  if (bk.skipped && bk.skipped[shotId]) delete bk.skipped[shotId];
+  await fullChanged(bk);
+  backToFull();
+  toast(`${shotId} saved ✓`);
+}
+$('#btnFlDifferent').onclick = () => {
+  $('#flNoteWrap').classList.remove('hidden');
+  $('#btnFlDifferent').classList.add('hidden');
+  const n = $('#inFlNote');
+  if (!n.value.trim()) n.value = NOTE_START;
+  n.focus();
+};
+$('#inFlNote').onchange = () => leaveFullText();
+$('#inFlWords').onchange = () => leaveFullText();
+async function leaveFullText() {
+  await leaveFull();
+  if (curBook && curBook.full) paintFullUpload(curBook, fullTally(curBook, await shotsFor(curBook.id)));
+}
+$('#btnFlNoteVoice').onclick = () => beginDictation('#inFlNote', '#btnFlNoteVoice', voiceToNote);
+$('#btnFlWordsVoice').onclick = () => beginDictation('#inFlWords', '#btnFlWordsVoice', voiceToVerbatim);
+$('#btnFlDelete').onclick = () => deleteBook(curBook.id, () => openRequests());
+$('#btnFlUpload').onclick = () => startFullUpload(curBook, $('#btnFlUpload'));
+// Sign in (a tap may open Google's sign-in), then queue. The screen stays open and
+// says "Keep the app open until it says Sent." (a phone may pause a page in the
+// background).
+async function startFullUpload(bk, btn) {
+  if (!bk || !bk.full) return;
+  const paused = !!(bk.upload && bk.upload.state === 'paused');
+  if (uploadActive(bk) && !paused) return;
+  btn.disabled = true;
+  try {
+    if (curBook && curBook.id === bk.id) await leaveFull();
+    const t = fullTally(bk, await shotsFor(bk.id));
+    if (!t.ready) throw new Error(t.done < t.total ? FULL_WORDS.progress(t.done, t.total)
+      : FULL_TEMPLATES[bk.template].grades.length > 1 ? FULL_WORDS.chooseGrades : FULL_WORDS.chooseGrade);
+    if (!cred('clientId')) throw new Error('This build has no Google Client ID yet — add one in ⚙ Settings');
+    btn.textContent = 'Signing in to Google…';
+    await getToken();
+    await askPersist();
+    if (paused) await setUpload(bk, { state: 'queued', error: '' });
+    else {
+      bk.upload = { state: 'queued', done: 0, total: 1, queued: Date.now(), error: '' };
+      await dbPut('books', bk);
+    }
+    if (curBook && curBook.id === bk.id) curBook = bk;
+    toast(FULL_WORDS.keepOpen, 4000);
+    if ($('#scr-full').classList.contains('active')) renderFull();
+    pumpUploads();
+  } catch (e) {
+    console.error(e);
+    toast(e.message, 4500);
+    if (curBook && curBook.id === bk.id && $('#scr-full').classList.contains('active')) renderFull();
+  }
+}
+// Every child of a folder this app may see (drive.file: the ones it made).
+async function folderChildren(fid) {
+  const out = [];
+  let page = '';
+  do {
+    const q = `'${fid}' in parents and trashed=false`;
+    const r = await drive(DRIVE_LIST + '?q=' + encodeURIComponent(q) + '&pageSize=1000&fields=nextPageToken,files(id,name,mimeType)' +
+      (page ? '&pageToken=' + encodeURIComponent(page) : ''));
+    out.push(...((r && r.files) || []));
+    page = (r && r.nextPageToken) || '';
+  } while (page);
+  return out;
+}
+// Create a new file, never replacing one (book.spot.json is written once).
+async function createFile(folder, name, mime, blob) {
+  const boundary = 'bookcurator' + Date.now();
+  const body = new Blob([
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`,
+    JSON.stringify({ name, parents: [folder] }),
+    `\r\n--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`,
+    blob,
+    `\r\n--${boundary}--`,
+  ]);
+  return drive('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+    method: 'POST',
+    headers: { 'Content-Type': 'multipart/related; boundary=' + boundary },
+    body,
+  });
+}
+// Move one file from a folder into another (both made by this app).
+async function driveMove(fileId, from, to) {
+  return drive(DRIVE_FILES + encodeURIComponent(fileId) + '?addParents=' + encodeURIComponent(to) +
+    '&removeParents=' + encodeURIComponent(from) + '&fields=id,parents', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+}
+// This capture's files: every photo taken (never 01 or 12: they are locked and
+// never sent again), and the copyright page's words if typed. One file name per
+// shot number, whatever the template.
+function fullFiles(bk, shots, words) {
+  const inT = {};
+  fullShotList(bk.template).forEach(s => { inT[s.id] = s; });
+  const out = [];
+  for (const x of shots) {
+    if (FULL_KEPT.indexOf(x.shotId) >= 0) continue;
+    if (x.shotId === FULL_TEXT.id) {
+      if (x.text) out.push({ shot: FULL_TEXT.id, name: `${words} - ${FULL_TEXT.id} ${FULL_TEXT.name}.txt`, mime: 'text/plain',
+        blob: new Blob([x.text], { type: 'text/plain' }), when: x.when, text: true });
+      continue;
+    }
+    if (!x.blob || !FULL_NAMES[x.shotId]) continue;
+    const s = inT[x.shotId];
+    out.push({ shot: x.shotId, name: `${words} - ${x.shotId} ${FULL_NAMES[x.shotId]}.jpg`, mime: 'image/jpeg', blob: x.blob,
+      w: x.w, h: x.h, when: x.when, required: !!(s && s.req), check: x.shotId === '27' });
+  }
+  return out;
+}
+async function uploadFull(bk) {
+  try {
+    // Once the request has left her list (filed or closed), nothing more goes up.
+    const live = ((await dbGet('kv', 'requests')) || {}).items || [];
+    if (!live.some(it => it && it.rid === bk.requestId)) throw new Error(FULL_WORDS.noLonger);
+    const shots = await shotsFor(bk.id);
+    const t = fullTally(bk, shots);
+    if (!t.ready) throw new Error(FULL_WORDS.progress(t.done, t.total));
+    await setUpload(bk, { state: 'uploading', done: 0, total: 1, error: '' });
+    // The same checks as when the book was opened, on the folder as it is now.
+    const chk = await fullFolderCheck({ folderId: bk.folderId, shelfFolderId: bk.shelfRef && bk.shelfRef.shelfFolderId, bookId: bk.requestBookId });
+    if (chk.words !== (bk.filing && bk.filing.words)) throw fullGone('filing words changed');
+    const fid = chk.folder.id, cur = chk.book.m;
+    let kids = await folderChildren(fid);
+    // 1. The spot-check record, kept whole beside the new one: book.spot.json, written
+    //    only when absent and never replaced (I7).
+    let spotM = null;
+    const spotKid = kids.filter(k => k.name === SPOT_JSON);
+    if (spotKid.length) {
+      try { spotM = JSON.parse(await driveText(DRIVE_FILES + encodeURIComponent(spotKid[0].id) + '?alt=media')); } catch (e) { spotM = null; }
+    } else {
+      let text = null;
+      if (cur.manifest !== 2) { spotM = cur; text = chk.book.text; }
+      else {
+        for (let p = cur.previous, n = 0; p && typeof p === 'object' && n < 50; p = p.previous, n++) {
+          if (p.manifest !== 2) { spotM = p; text = JSON.stringify(p, null, 2); break; }
+        }
+      }
+      if (text != null) await createFile(fid, SPOT_JSON, 'application/json', new Blob([text], { type: 'application/json' }));
+      else console.warn('full capture: no spot-check record to keep for', bk.requestId);
+    }
+    // 2. F24: the files of an earlier capture that book.json still lists (one the
+    //    curator refused as "Not this book") go into a sub-folder before anything
+    //    new goes up: every file it lists that book.spot.json does not. Never 01 or
+    //    12, never a file this capture sent. Done once per earlier capture.
+    const asideKey = cur.manifest === 2 && cur.requestId !== bk.requestId ? `${cur.requestId || ''}|${cur.updated || ''}` : '';
+    if (asideKey && spotM && !(bk.aside && bk.aside.key === asideKey)) {
+      const keep = new Set(listedNames(spotM).concat(FULL_KEPT.map(id => chk.kept[id].file), ['book.json', SPOT_JSON]));
+      const mine = new Set(Object.values(bk.fileIds || {}));
+      const go = new Set(listedNames(cur).filter(n => !keep.has(n)));
+      const move = kids.filter(k => go.has(k.name) && !mine.has(k.id) && k.mimeType !== FOLDER_MIME);
+      let sub = '';
+      if (move.length) {
+        sub = await findOrCreateFolder(ASIDE_PREFIX + localDay(), fid);
+        for (const k of move) await driveMove(k.id, fid, sub);
+      }
+      bk.aside = { key: asideKey, rid: String(cur.requestId || ''), folderId: sub, moved: move.length, at: Date.now() };
+      await dbPut('books', bk);
+      kids = await folderChildren(fid);
+    }
+    // 3. Only files not sent yet, or changed since they were sent, two at a time.
+    const files = fullFiles(bk, shots, chk.words);
+    const have = {};
+    kids.forEach(k => { (have[k.name] = have[k.name] || []).push(k.id); });
+    bk.sent = bk.sent || {};
+    bk.fileIds = bk.fileIds || {};
+    const todo = files.filter(f => !(bk.sent[f.name] === f.when && (have[f.name] || []).indexOf(bk.fileIds[f.name]) >= 0));
+    await setUpload(bk, { done: files.length - todo.length, total: files.length + 1 });
+    let next = 0, failed = null, paused = false;
+    const worker = async () => {
+      while (next < todo.length && !failed && !paused) {
+        if (!tokenFresh()) { paused = true; break; }
+        const f = todo[next++];
+        try {
+          const up = await uploadFile(fid, f.name, f.mime, f.blob);
+          if (up && up.id) bk.fileIds[f.name] = up.id;
+          bk.sent[f.name] = f.when;
+          await setUpload(bk, { done: bk.upload.done + 1 });
+        } catch (e) { failed = e; }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(UPLOAD_PARALLEL, todo.length) }, worker));
+    if (failed) throw failed;
+    if (paused) { await setUpload(bk, { state: 'paused' }); return; }
+    // 4. book.json last, in place of the one it read, which `previous` keeps whole.
+    await writeFullManifest(fid, bk, files, chk);
+    await setUpload(bk, { done: files.length + 1 });
+    bk.uploaded = Date.now();
+    delete bk.upload;
+    await dbPut('books', bk);
+    if (curBook && curBook.id === bk.id) curBook = bk;
+    await setAnswered(bk.requestId, { uploaded: bk.uploaded });
+    toast(`Sent “${bk.title}” ✓`, 3600);
+    renderReqCard();
+    if ($('#scr-requests').classList.contains('active')) openRequests();
+    if ($('#scr-full').classList.contains('active') && curBook && curBook.id === bk.id) renderFull();
+  } catch (e) {
+    console.error('upload', bk.id, (e && e.why) || '', e);
+    const full = driveIsFull(e);
+    const msg = full ? FULL_WORDS.driveFull : String((e && e.message) || e);
+    if (!full && !(e && e.fullGone) && /sign-in|token|401/i.test(msg)) { await setUpload(bk, { state: 'paused' }); return; }
+    await setUpload(bk, { state: 'failed', error: msg.slice(0, 120) });
+    if ($('#scr-full').classList.contains('active') && curBook && curBook.id === bk.id) renderFull();
+  }
+}
+// book.json of a full capture (scope C2), written LAST.
+async function writeFullManifest(folder, bk, files, chk) {
+  const started = bk.startedAt || bk.created, finished = bk.finishedAt || Date.now();
+  const r = bk.shelfRef || {}, t = bk.template, T = FULL_TEMPLATES[t];
+  const was = Array.isArray(chk.book.m.photos) ? chk.book.m.photos : [];
+  const photos = FULL_KEPT.map(id => {
+    const p = was.find(x => x && x.shot === id) || {};
+    return { shot: id, file: chk.kept[id].file, w: p.w == null ? null : p.w, h: p.h == null ? null : p.h, required: true, kept: true, check: false };
+  }).concat(files.filter(f => !f.text).map(f => ({ shot: f.shot, file: f.name, w: f.w, h: f.h, required: f.required, kept: false, check: f.check })))
+    .sort((a, b) => a.shot.localeCompare(b.shot));
+  const sent = new Set(files.map(f => f.shot));
+  const sk = bk.skipped || {};
+  const skipped = fullShotList(t).filter(s => s.req && !sent.has(s.id) && fullSkipOk(sk[s.id]))
+    .map(s => ({ shot: s.id, why: whyKey(sk[s.id]) === 'other' ? 'other: ' + whyText(sk[s.id]).trim() : sk[s.id] }));
+  const g = bk.grades || {}, fl = bk.flags || {}, jacket = T.grades.indexOf('jacket') >= 0;
+  const grade = v => FULL_GRADES.indexOf(v) >= 0 ? v : '';
+  const manifest = {
+    bookCurator: 1,
+    kind: 'book',
+    manifest: 2,
+    requestType: 'Full capture',
+    template: t,
+    askedTemplate: bk.askedTemplate || t,
+    templateWhy: bk.templateWhy || '',
+    appBookId: bk.id,
+    author: chk.author,
+    title: chk.title,
+    requestId: bk.requestId || '',
+    requestBookId: bk.requestBookId || '',
+    folderId: folder,
+    shelfRef: { shelfId: r.shelfId || '', shelfFolderId: r.shelfFolderId || '', file: r.file || '', box: r.box || null, where: r.where || '' },
+    note: bk.note || '',
+    photos,
+    texts: files.filter(f => f.text).map(f => ({ shot: f.shot, file: f.name })),
+    skipped,
+    grades: { jacket: jacket ? grade(g.jacket) : '', book: grade(g.book) },
+    flags: { jacket: jacket ? FULL_FLAGS.jacket.filter(x => (fl.jacket || []).indexOf(x) >= 0) : [],
+      book: FULL_FLAGS.book.filter(x => (fl.book || []).indexOf(x) >= 0) },
+    operator: bk.operator || settings.operator || '',
+    startedAt: new Date(started).toISOString(),
+    finishedAt: new Date(finished).toISOString(),
+    captureMinutes: Math.round((finished - started) / 6000) / 10,
+    previous: chk.book.m,
+    app: APP_VERSION,
+    updated: new Date().toISOString(),
+  };
+  const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
+  await uploadFile(folder, 'book.json', 'application/json', blob);
 }
 
 /* ---------- uploaded shelves ---------- */

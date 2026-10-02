@@ -179,6 +179,7 @@ h2.sect { font-size: 13px; color: var(--dim); text-transform: uppercase; letter-
   width: 52px; height: 52px; border-radius: 50%; border: 1px solid rgba(255,255,255,.4);
   background: rgba(0,0,0,.4); color: #fff; font-size: 22px;
 }
+.iconbtn2.on { background: var(--accent); border-color: var(--accent); }
 #camFallback {
   position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 18px; padding: 24px; text-align: center;
@@ -267,6 +268,45 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
 .bkshot.got .bk-req { color: var(--ok); }
 .bk-take { margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--card2); padding: 9px 12px; font-size: 14.5px; font-weight: 600; }
 #bkStatus { color: #e0b04a; font-size: 13.5px; min-height: 18px; margin: 12px 0 8px; }
+/* a whole book (Full capture) */
+.reqitem .rq-k { font-size: 12.5px; margin-top: 4px; color: var(--text); }
+#rqKind { font-size: 14.5px; font-weight: 600; margin: 10px 0 0; }
+#rqPrev { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+#rqPrev:empty { display: none; }
+.rq-prev { width: 76px; height: 76px; object-fit: cover; border-radius: 10px; background: #26262c; }
+#flTitle { font-size: 19px; font-weight: 700; margin: 4px 0 0; }
+#flAuthor { font-size: 15px; margin: 3px 0 0; }
+#flWhere { color: var(--dim); font-size: 13.5px; margin: 10px 0 0; }
+#flAsked { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 12px 0 0; font-size: 15px; line-height: 1.4; }
+.fl-kindrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 14px; }
+#flKind { font-size: 15px; font-weight: 700; }
+.fl-kindrow .linkbtn { padding-top: 0; }
+.fl-panel { background: var(--card); border: 1px solid var(--accent); border-radius: 14px; padding: 12px; margin: 10px 0 0; }
+.fl-panel p { margin: 0 0 10px; font-size: 14.5px; line-height: 1.4; }
+.fl-panel input { margin-top: 10px; }
+.fl-panel .row2 { margin-top: 12px; }
+#flProgress { color: var(--accent); font-size: 14px; font-weight: 700; margin: 14px 0 0; }
+.fl-kept { color: var(--ok); font-size: 13px; margin-top: 6px; }
+.bkshot.kept { opacity: .85; }
+.bkshot.skip .bk-name { color: var(--dim); }
+.bk-view:disabled { opacity: 1; }
+.fl-cant { font-size: 13.5px; padding: 8px 0 0; display: block; text-align: left; }
+.fl-why { margin-top: 8px; }
+.fl-why .chip { font-size: 13px; padding: 7px 11px; }
+.fl-other { margin-top: 8px; }
+hr.fl-line { border: 0; border-top: 1px solid var(--line); margin: 26px 0 0; }
+.fl-grade { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 12px; }
+.fl-ghead { font-weight: 700; font-size: 15.5px; margin-bottom: 8px; }
+.grows { display: flex; flex-direction: column; gap: 6px; }
+.grow { display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--card2); padding: 9px 10px; font-size: 13.5px; line-height: 1.35; }
+.grow b { flex: none; min-width: 44px; font-size: 15px; }
+.grow span { color: var(--dim); }
+.grow.on { border-color: var(--accent); background: #2a2213; }
+.grow.on span { color: var(--text); }
+.fl-flags { margin-top: 10px; }
+#flStatus { color: #e0b04a; font-size: 13.5px; min-height: 18px; margin: 12px 0 4px; }
+#flKeepOpen { color: var(--text); font-size: 14px; font-weight: 600; margin: 4px 0 12px; }
 /* toast */
 #toast {
   position: fixed; left: 50%; bottom: calc(30px + env(safe-area-inset-bottom)); transform: translateX(-50%);
@@ -363,6 +403,7 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
         <input type="range" id="zoom">
       </div>
       <div class="camrow">
+        <button id="btnTorch" class="iconbtn2 hidden" aria-label="Torch">🔦</button>
         <button id="btnSnap" aria-label="Take photo"></button>
         <button id="btnImport" class="iconbtn2" aria-label="Import from gallery">🖼</button>
       </div>
@@ -412,7 +453,9 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
   <div id="rqTitle"></div>
   <div id="rqAuthor"></div>
   <div id="rqWhere"></div>
+  <div id="rqKind" class="hidden"></div>
   <div id="rqAsked"></div>
+  <div id="rqPrev"></div>
   <div id="rqNote"></div>
   <div id="rqPhoto"></div>
   <div class="stack" style="margin-top:16px">
@@ -442,6 +485,41 @@ p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 
   <div class="stack">
     <button id="btnBkUpload" class="primary">☁ Upload to Google Drive</button>
     <button id="btnBkDelete" class="secondary danger">Delete this book from the phone</button>
+  </div>
+</section>
+
+<section id="scr-full">
+  <div class="bk-q">Is this the book?</div>
+  <div id="flTitle"></div>
+  <div id="flAuthor"></div>
+  <div id="flWhere"></div>
+  <div id="flAsked"></div>
+  <button id="btnFlDifferent" class="linkbtn">It's a different book</button>
+  <div id="flNoteWrap" class="hidden">
+    <label class="field" for="inFlNote">Note for your curator <span class="lbl-opt">— finish the sentence, then photograph the book in your hand below</span></label>
+    <textarea id="inFlNote" autocomplete="off" autocapitalize="sentences"></textarea>
+    <button id="btnFlNoteVoice" class="secondary voicebtn hidden" data-idle="🎤 Dictate">🎤 Dictate</button>
+  </div>
+  <div class="fl-kindrow"><span id="flKind"></span><button id="btnFlSwitch" class="linkbtn"></button></div>
+  <div id="flSwitch" class="fl-panel hidden">
+    <p id="flSwitchQ"></p>
+    <p id="flSwitchKeep" class="hint"></p>
+    <div id="flSwitchChips" class="chips"></div>
+    <input type="text" id="inFlSwitchOther" class="hidden" autocomplete="off" autocapitalize="sentences">
+    <div class="row2"><button id="btnFlSwitchGo" class="secondary"></button><button id="btnFlSwitchNo" class="secondary"></button></div>
+  </div>
+  <div id="flProgress"></div>
+  <div id="flList"></div>
+  <label class="field" for="inFlWords">13 Copyright page words <span class="lbl-opt">(optional)</span></label>
+  <textarea id="inFlWords" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. First Edition&#10;10 9 8 7 6 5 4 3 2 1"></textarea>
+  <button id="btnFlWordsVoice" class="secondary voicebtn hidden" data-idle="🎤 Dictate">🎤 Dictate</button>
+  <p class="voicehint">Type what the page says, line by line. If there is a <b>🎤 Dictate</b> button above, you can tap it and say the words instead. Numbers said as words become digits ("ten nine eight" gives 10 9 8, "nineteen sixty three" gives 1963). Say <b>new line</b> for a new line and <b>copyright sign</b> for ©.</p>
+  <div id="flExtra"></div>
+  <div id="flStatus"></div>
+  <p id="flKeepOpen"></p>
+  <div class="stack">
+    <button id="btnFlUpload" class="primary">☁ Upload to Google Drive</button>
+    <button id="btnFlDelete" class="secondary danger">Delete this book from the phone</button>
   </div>
 </section>
 
