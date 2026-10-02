@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-193209';
+const APP_VERSION = '20261002-200541';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -84,6 +84,9 @@ const FULL_WORDS = {
   chooseGrade: 'Choose how good the book is.',
   noLonger: 'Your curator no longer asks for this book',
   closed: 'Your curator no longer asks for this book. Delete it from this phone when you like.',
+  // New words, awaiting the owner's yes: in place of `closed` when a new request for
+  // the same book (the same folder and Book ID) is on the list above.
+  askedAgain: 'Your curator has asked for this book again (above). These are the photos for the earlier request; delete them from this phone when you like.',
   // New words, still to be approved before they ship: the upload asks the curator's
   // list itself before it sends; a book whose request has left the list stays on the
   // phone until she deletes it; the first opening needs the internet.
@@ -1915,9 +1918,15 @@ async function openRequests() {
     if (g !== cur) { cur = g; const h = document.createElement('h2'); h.className = 'sect'; h.textContent = g; list.appendChild(h); }
     let st = reqState(it, answered, books);
     // A whole book this request will take over (its earlier request was replaced):
-    // the photos already taken count.
+    // the photos already taken count, on the list the takeover will use
+    // (fullTakeTemplate), as the line above them does.
     const taken = st.key === 'todo' && takers.indexOf(it) >= 0 ? fullAdoptFor(it, allBooks, liveRids) : null;
-    if (taken && taken.progress && taken.progress.started) st = { key: 'todo', text: FULL_WORDS.progress(taken.progress.done, taken.progress.total) };
+    if (taken) {
+      const tt = fullTakeTemplate(taken, it);
+      const tl = FULL_TEMPLATES[tt] ? fullTally({ ...taken, template: tt }, await shotsFor(taken.id)) : null;
+      if (token !== openRequests.n) return;   // a newer draw of this screen has started
+      if (tl && tl.started) st = { key: 'todo', text: FULL_WORDS.progress(tl.done, tl.total) };
+    }
     const row = document.createElement('button');
     row.className = 'reqitem ' + st.key;
     row.dataset.rid = it.rid;
@@ -1954,7 +1963,12 @@ async function openRequests() {
     const row = document.createElement('div');
     row.className = 'reqitem started onphone';
     row.dataset.book = bk.id;
-    const line = bk.upload && bk.upload.state === 'uploading' ? uploadLabel(bk) : bk.uploaded ? FULL_WORDS.onPhoneSent : FULL_WORDS.closed;
+    // A new request for the same book (its folder and Book ID) is on the list above:
+    // never "no longer asks".
+    const again = !!bk.folderId && !!bk.requestBookId && items.some(it => reqKind(it) === 'full' &&
+      String(it.folderId || '') === bk.folderId && String(it.bookId || '') === bk.requestBookId);
+    const line = bk.upload && bk.upload.state === 'uploading' ? uploadLabel(bk) : bk.uploaded ? FULL_WORDS.onPhoneSent
+      : again ? FULL_WORDS.askedAgain : FULL_WORDS.closed;
     row.innerHTML = `<div class="rq-t">${esc(bk.title || '(no title)')}</div><div class="rq-a">${esc(bk.author || '')}</div>` +
       `<div class="rq-s">${esc(line)}</div>` +
       '<div class="row2" style="margin-top:10px"><button class="secondary danger st-del">Delete</button></div>';
@@ -2209,10 +2223,10 @@ async function deleteBook(id, then) {
   const bk = await dbGet('books', id);
   if (!bk) return then();
   if (bk.upload && bk.upload.state === 'uploading') return toast('Wait for the upload to finish');
-  // A whole book says first whether it was ever sent (book.json written), and
-  // whether its last changes were.
+  // A whole book says first whether it was ever sent (book.json written, or tried:
+  // its answer may have been lost), and whether its last changes were.
   const ask = !bk.full ? 'This book answers a request from your curator; delete it from the phone anyway?'
-    : bk.uploaded ? FULL_WORDS.deleteSent : bk.manifestAt ? FULL_WORDS.deleteChanged : FULL_WORDS.deleteUnsent;
+    : bk.uploaded ? FULL_WORDS.deleteSent : (bk.manifestAt || bk.manifestTry) ? FULL_WORDS.deleteChanged : FULL_WORDS.deleteUnsent;
   if (!confirm(ask)) return;
   stopVoice();
   for (const s of await shotsFor(id)) await dbDel('shots', [id, s.shotId]);
@@ -2299,9 +2313,11 @@ function localDay() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.
 // left the list (the curator withdrew it and asked again, say to fix the template or
 // the words), the new one names the same folder and the same Book ID, and it never
 // wrote book.json, so the curator never saw it and never refused it ("Not this book"
-// refuses only a capture he saw). Not while it is going up.
+// refuses only a capture he saw). Never one that tried to write book.json (manifestTry:
+// the write may have landed though its answer was lost), and the takeover also reads
+// the folder (fullWroteIn). Not while it is going up.
 function fullAdoptable(rec, it, liveRids) {
-  return !!rec && !!rec.full && !rec.manifestAt && !rec.uploaded && rec.requestId !== it.rid &&
+  return !!rec && !!rec.full && !rec.manifestAt && !rec.manifestTry && !rec.uploaded && rec.requestId !== it.rid &&
     liveRids.indexOf(rec.requestId) < 0 && !!it.folderId && rec.folderId === String(it.folderId) &&
     !!rec.requestBookId && rec.requestBookId === String(it.bookId || '') &&
     !(rec.upload && /^(queued|uploading)$/.test(rec.upload.state));
@@ -2309,6 +2325,20 @@ function fullAdoptable(rec, it, liveRids) {
 // The newest such record, if any.
 function fullAdoptFor(it, allBooks, liveRids) {
   return allBooks.filter(b => fullAdoptable(b, it, liveRids)).sort((a, b) => b.created - a.created)[0] || null;
+}
+// The book.json this record wrote, if the folder shows one: a full capture's record
+// (manifest 2) of its request or of this record, the folder's own book.json or one
+// kept in the `previous` of a later one. Such a capture reached the curator.
+function fullWroteIn(m, rec) {
+  for (let p = m, n = 0; p && typeof p === 'object' && !Array.isArray(p) && n < 50; p = p.previous, n++) {
+    if (p.manifest === 2 && ((!!rec.requestId && p.requestId === rec.requestId) || (!!rec.id && p.appBookId === rec.id))) return p;
+  }
+  return null;
+}
+// The list a whole book taken over by request `it` will use: her own switch to the
+// other list (templateWhy) stands; otherwise the list the request asks for.
+function fullTakeTemplate(rec, it) {
+  return rec.templateWhy && rec.template !== it.template ? rec.template : it.template;
 }
 // What a whole-book record takes from its request and its checked folder.
 function fullFromItem(it, chk) {
@@ -2447,6 +2477,13 @@ async function openFullFromRequest(rid) {
   // folder, same Book ID, never sent): this request takes it over with its photos and
   // choices, so nothing is stranded and nothing is shot twice.
   const live = ((((await dbGet('kv', 'requests')) || {}).items) || []).map(x => x && x.rid);
+  // Never one whose book.json is in this folder (the phone may not know it landed):
+  // the curator may have seen it and refused it. It is marked as having written
+  // book.json, so the list and Delete say so, and this request starts afresh.
+  for (const b of await dbAll('books')) {
+    const m = fullAdoptable(b, it, live) ? fullWroteIn(chk.book.m, b) : null;
+    if (m) await dbPatch('books', b.id, r => { if (r.manifestAt) return null; r.manifestAt = Date.parse(m.updated) || Date.now(); return r; });
+  }
   const old = fullAdoptFor(it, await dbAll('books'), live);
   let bk = null;
   if (old) {
@@ -2457,8 +2494,9 @@ async function openFullFromRequest(rid) {
       Object.assign(r, fullFromItem(it, chk));
       r.kept = chk.kept;
       r.askedTemplate = t;
-      // Her own "This book is different" stands; otherwise the list the request asks for.
-      if (!r.templateWhy || r.template === t) { r.template = t; r.templateWhy = ''; }
+      // Her own switch stands; otherwise the list the request asks for (fullTakeTemplate,
+      // which the Requests list counts by too).
+      if (fullTakeTemplate(r, it) === t) { r.template = t; r.templateWhy = ''; }
       delete r.upload;
       r.uploaded = null;
       r.rev = (r.rev || 0) + 1;
@@ -2509,14 +2547,15 @@ function fullTally(bk, shots) {
 function fullEditable(bk) { return !!bk && !(uploadActive(bk) && bk.upload.state !== 'paused'); }
 // The upload and the checklist each work on their own copy of a whole book's record,
 // and each stores only its own part, in one step (dbPatch): the upload stores what
-// it sent, the files' ids, any move aside, its state and when it last wrote book.json
-// (FULL_UP_KEYS, and `uploaded` when it is done); the checklist stores everything
+// it sent, the files' ids, any move aside, its state, when it last tried to write
+// book.json and when it last wrote it (FULL_UP_KEYS, and `uploaded` when it is done);
+// the checklist stores everything
 // else. So neither ever writes back an older copy of the other's part (which would
 // send files again, move this capture's own files aside as if they were a refused
 // one's, or undo a change made while the files went up). Every change she makes
 // counts one more revision (`rev`); an upload that finds the revision moved goes
 // round again rather than calling the book Sent.
-const FULL_UP_KEYS = ['upload', 'sent', 'fileIds', 'aside', 'manifestAt'];
+const FULL_UP_KEYS = ['upload', 'sent', 'fileIds', 'aside', 'manifestTry', 'manifestAt'];
 function fullTakeUp(bk, rec) {
   for (const k of FULL_UP_KEYS.concat(['uploaded', 'rev'])) { if (rec && k in rec) bk[k] = rec[k]; else delete bk[k]; }
   bk.sent = bk.sent || {};
@@ -3111,6 +3150,11 @@ async function uploadFull(bk) {
     //    again, so book.json is never written for a book the curator has filed since.
     if (await fullRevMoved(bk, rev0)) { await setUpload(bk, { state: 'queued' }); return; }
     if (!(await fullAskedOrStop(bk))) return;
+    // Noted on the phone before book.json is written: if its answer is lost (the page
+    // closed, no signal) the write may still have landed, so a new request never takes
+    // this capture over and Delete never says it was never sent. Not noted, not written.
+    bk.manifestTry = Date.now();
+    if (!(await fullStoreUpload(bk))) return;
     await writeFullManifest(fid, bk, files, chk);
     await setUpload(bk, { done: files.length + 1 });
     // Sent, unless she changed something while book.json went up: then round again.

@@ -61,7 +61,9 @@ at any time from Drive itself. Declining is remembered too.
 ## Privacy
 
 Everything (photos, labels, settings) is stored locally in the browser on the
-phone. Photos go only to your own Google Drive, when you explicitly upload. To show
+phone. Photos go only to your own Google Drive, when you explicitly upload. The app
+signs you in to your own Google account (accounts.google.com) when you upload, or
+when you open a book your curator asks you to photograph in full. To show
 your curator's requests, the app sends the Google Drive ids of folders it created
 (no photos, no names) and which kinds of request this version can answer to the
 curator's request service at script.google.com, and
