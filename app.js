@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-171852';
+const APP_VERSION = '20261002-185518';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -101,6 +101,18 @@ const FULL_WORDS = {
     G: 'Good: an ordinary used copy, worn but complete.',
     FR: 'Fair: well worn. All the text is there, but an endpaper or similar may be missing.',
     P: 'Poor: so worn that only the text is worth keeping (a reading copy).',
+  },
+  // The same seven grades for the jacket, in the same plain style (new words, still
+  // to be approved before they ship): a jacket is judged by its tears, chips,
+  // missing pieces, rubbing and fading, not by its text.
+  jacketGradeLines: {
+    F: 'Fine: like new. No tears, chips, rubbing or fading.',
+    NF: 'Near Fine: almost Fine, with one or two very small faults.',
+    'VG+': 'Very Good plus: better than Very Good, not quite Near Fine.',
+    VG: 'Very Good: some light wear, perhaps a small tear or chip at an edge.',
+    G: 'Good: an ordinary used jacket, worn, with some tears or chips.',
+    FR: 'Fair: well worn, with tears, chips or small pieces missing.',
+    P: 'Poor: badly torn, with large pieces missing, or in pieces.',
   },
 };
 // C7: the grade buttons, and the chips in the sheet's own list words.
@@ -1889,12 +1901,13 @@ function reqFreeUrl() {
   if (reqPrevUrl) { URL.revokeObjectURL(reqPrevUrl); reqPrevUrl = null; }
 }
 let reqPrevUrl = null;
-// The spot-check answer this phone sent for a book, if it still holds it: the
-// record whose folder is the request's folder, else the one for the same Book ID.
+// The spot-check answer this phone sent for a book, if it still holds it: only the
+// record that went into the request's own folder. Never one found by Book ID alone:
+// that could be a copy the curator refused, sent into another folder, and the
+// picture is there so she picks up the right book.
 async function spotRecordFor(it) {
-  const spot = (await dbAll('books')).filter(b => !b.full);
-  return spot.find(b => it.folderId && b.driveFolderId === it.folderId) ||
-    spot.find(b => it.bookId && b.requestBookId === it.bookId) || null;
+  if (!it.folderId) return null;
+  return (await dbAll('books')).find(b => !b.full && b.driveFolderId === it.folderId) || null;
 }
 // One request: the words, and the spine marked on this phone's own shelf photo
 // (never drawn on a photo retaken after the curator saw it).
@@ -2515,7 +2528,8 @@ function fullGradeBox(bk, k) {
   box.className = 'fl-grade';
   box.dataset.grade = k;
   const cur = (bk.grades || {})[k];
-  const opts = FULL_GRADES.map(g => `<button class="grow${cur === g ? ' on' : ''}" data-g="${esc(g)}"><b>${esc(g)}</b><span>${esc(FULL_WORDS.gradeLines[g])}</span></button>`).join('') +
+  const lines = k === 'jacket' ? FULL_WORDS.jacketGradeLines : FULL_WORDS.gradeLines;
+  const opts = FULL_GRADES.map(g => `<button class="grow${cur === g ? ' on' : ''}" data-g="${esc(g)}"><b>${esc(g)}</b><span>${esc(lines[g])}</span></button>`).join('') +
     `<button class="grow${cur === '' ? ' on' : ''}" data-g=""><b>${esc(FULL_WORDS.notSure)}</b><span>${esc(FULL_WORDS.notSureLine)}</span></button>`;
   const flags = FULL_FLAGS[k].map(f => `<button class="chip${((bk.flags || {})[k] || []).includes(f) ? ' on' : ''}" data-flag="${esc(f)}">${esc(f)}</button>`).join('');
   box.innerHTML = `<div class="fl-ghead">${esc(FULL_WORDS.gradeHeads[k])}</div><div class="grows">${opts}</div><div class="chips fl-flags">${flags}</div>`;
