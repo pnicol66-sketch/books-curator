@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-171601';
+const APP_VERSION = '20261002-171808';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -2846,6 +2846,10 @@ async function uploadFull(bk) {
     await send(todo.filter(f => !f.text));
     if (!failed && !paused) await send(todo.filter(f => f.text));
     if (failed) throw failed;
+    // A whole book can take long enough for the sign-in to run low during the last
+    // photo: renewing it opens Google's sign-in, which only a tap may do, so pause
+    // and write book.json when she signs in again (every file is already sent).
+    if (!paused && !tokenFresh()) paused = true;
     if (paused) { await setUpload(bk, { state: 'paused' }); return; }
     // 4. book.json last, in place of the one it read, which `previous` keeps whole.
     await writeFullManifest(fid, bk, files, chk);
