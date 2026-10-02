@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-171158';
+const APP_VERSION = '20261002-171601';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -1929,7 +1929,7 @@ async function openRequest(rid) {
     const sp = await spotRecordFor(it);
     const p01 = sp ? (await shotsFor(sp.id)).find(x => x.shotId === '01' && x.blob) : null;
     if (p01) {
-      reqPrevUrl = URL.createObjectURL(p01.blob);
+      reqPrevUrl = URL.createObjectURL(await keptThumb(p01));
       prev.innerHTML = `<img class="rq-prev" alt="01" src="${reqPrevUrl}"><span class="hint">01 · ${esc(FULL_WORDS.sentEarlier)}</span>`;
     }
   }
@@ -2399,7 +2399,9 @@ async function renderFull() {
   if (!bk || !bk.full) return;
   const shots = await shotsFor(bk.id);
   const spot = await spotRecordFor({ folderId: bk.folderId, bookId: bk.requestBookId });
-  const spotShots = spot ? await shotsFor(spot.id) : [];
+  // 01 and 12 from the spot-check carry no small copy: one is made once a session.
+  const spotShots = await Promise.all((spot ? await shotsFor(spot.id) : [])
+    .map(async x => FULL_KEPT.indexOf(x.shotId) >= 0 && x.blob ? { ...x, thumb: await keptThumb(x) } : x));
   if (curBook !== bk || !$('#scr-full').classList.contains('active')) return;
   fullThumbs.forEach(u => URL.revokeObjectURL(u));
   fullThumbs = [];
@@ -2455,7 +2457,7 @@ function fullShotRow(bk, s, shots, spotShots, extra) {
     const held = spotShots.find(x => x.shotId === s.id && x.blob);
     row.className = 'bkshot got kept';
     let thumb = '<span class="bk-thumb empty">✓</span>';
-    if (held) { const u = URL.createObjectURL(held.blob); fullThumbs.push(u); thumb = `<img class="bk-thumb" alt="${esc(s.id)}" src="${u}">`; }
+    if (held) { const u = URL.createObjectURL(held.thumb || held.blob); fullThumbs.push(u); thumb = `<img class="bk-thumb" alt="${esc(s.id)}" src="${u}">`; }
     row.innerHTML = `<button class="bk-view" aria-label="View ${esc(s.id)}">${thumb}</button>` +
       `<div class="bk-body"><div class="bk-name">${esc(s.id)} ${esc(s.label)}</div>` +
       `<div class="fl-kept">✓ ${esc(FULL_WORDS.sentEarlier)}</div></div>`;
@@ -2622,6 +2624,19 @@ async function openFullCamera(shotId) {
 }
 // A small JPEG for the checklist, made once when a shot is kept (the list never
 // decodes a full-size photo into a tile).
+// A small copy of a photo sent at spot-check (made by an older app, with none of its
+// own), once a session; the full photo if it cannot be made.
+const keptThumbs = new Map();
+function keptThumb(x) {
+  const k = `${x.bookId}|${x.shotId}|${x.when || ''}|${x.blob ? x.blob.size : 0}`;
+  if (!keptThumbs.has(k)) keptThumbs.set(k, (async () => {
+    let bmp = null;
+    try { bmp = await createImageBitmap(x.blob); return await makeThumb(bmp); }
+    catch (e) { return x.blob; }
+    finally { if (bmp && bmp.close) bmp.close(); }
+  })());
+  return keptThumbs.get(k);
+}
 function makeThumb(bmp, max = 200) {
   const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas');
