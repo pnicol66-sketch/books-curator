@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-185518';
+const APP_VERSION = '20261002-185610';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -2385,6 +2385,9 @@ async function leaveFull() {
   stopVoice();
   const bk = curBook;
   if (!bk || !bk.full || !$('#scr-full').classList.contains('active') || !fullEditable(bk)) return;
+  // Only what the screen shows of THIS book: while it is still being drawn the boxes
+  // are empty (renderFull), never another book's words.
+  if ($('#scr-full').dataset.book !== bk.id) return;
   let note = $('#inFlNote').value.trim();
   if (note === NOTE_START.trim()) note = '';
   const words = tidyVerbatim($('#inFlWords').value);
@@ -2409,6 +2412,19 @@ async function leaveFull() {
 async function renderFull() {
   const bk = curBook;
   if (!bk || !bk.full) return;
+  const scr = $('#scr-full');
+  // Another book (or the first drawing since the app opened): empty the boxes and the
+  // list before waiting for anything, so a tap or Back in that moment can neither
+  // read the last book's note and words into this one nor act on its rows; the
+  // screen is stamped with this book only once it shows this book's own values.
+  if (scr.dataset.book !== bk.id) {
+    scr.dataset.book = '';
+    $('#flList').innerHTML = '';
+    $('#flExtra').innerHTML = '';
+    $('#inFlNote').value = '';
+    $('#inFlWords').value = '';
+    $('#btnFlUpload').disabled = true;
+  }
   const shots = await shotsFor(bk.id);
   const spot = await spotRecordFor({ folderId: bk.folderId, bookId: bk.requestBookId });
   // 01 and 12 from the spot-check carry no small copy: one is made once a session.
@@ -2458,6 +2474,7 @@ async function renderFull() {
   $('#btnFlWordsVoice').classList.toggle('hidden', !SpeechRec);
   $('#btnFlNoteVoice').classList.toggle('hidden', !SpeechRec);
   $('#flKeepOpen').textContent = FULL_WORDS.keepOpen;
+  scr.dataset.book = bk.id;
   paintFullUpload(bk, fullTally(bk, shots));
 }
 // One line of the checklist: a kept shot (Sent earlier, locked), or a shot to take,
