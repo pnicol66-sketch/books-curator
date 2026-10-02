@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-165416';
+const APP_VERSION = '20261002-171158';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -1906,6 +1906,7 @@ async function openRequest(rid) {
   reqFreeUrl();
   show('scr-request', { title: 'Request', back: () => { reqFreeUrl(); openRequests(); } });
   $('#btnRqShoot').onclick = () => openBookFromRequest(rid);
+  $('#btnRqShoot').dataset.rid = rid;
   $('#rqTitle').textContent = it.title || '';
   $('#rqAuthor').textContent = it.author || '';
   $('#rqWhere').textContent = it.where || '';
@@ -1999,6 +2000,9 @@ async function openBookFromRequest(rid) {
   if (kind === 'other') { toast(FULL_WORDS.needUpdate, 6000); return; }
   const a = (await answeredMap())[rid];
   let bk = a && a.bookId ? await dbGet('books', a.bookId) : null;
+  // A whole book whose request has left her list is closed on the phone: never the
+  // two-photo screen (the list keeps it, with Delete).
+  if (bk && bk.full) return openRequests();
   if (!bk && !it) return openRequests();
   if (!bk) {
     // A record deleted after an upload is made again with the folder it used,
@@ -2266,6 +2270,9 @@ async function openFullFromRequest(rid) {
   // Leaving and coming back reopens the checklist with its ticks (no network needed).
   if (had && had.full && had.folderId === String(it.folderId || '')) { curBook = had; reqFreeUrl(); return backToFull(); }
   const btn = $('#btnRqShoot'), note = $('#rqNote');
+  // The check takes a few calls to Drive. If she has moved to another screen by the
+  // time it answers, it never takes that screen over or writes on it.
+  const here = () => $('#scr-request').classList.contains('active') && btn.dataset.rid === rid;
   btn.disabled = true;
   btn.textContent = 'Checking…';
   let chk;
@@ -2274,6 +2281,7 @@ async function openFullFromRequest(rid) {
     chk = await fullFolderCheck({ folderId: it.folderId, shelfFolderId: it.key, bookId: it.bookId });
   } catch (e) {
     console.error('full capture check', rid, (e && e.why) || e);
+    if (!here()) return;
     if (e && e.fullGone) note.textContent = FULL_WORDS.folderGone;
     toast((e && e.message) || String(e), 6000);
     btn.disabled = false;
@@ -2281,6 +2289,13 @@ async function openFullFromRequest(rid) {
     return;
   }
   await askPersist();
+  // A second tap that checked at the same time has made the record already: use it.
+  const a2 = (await answeredMap())[rid];
+  const had2 = a2 && a2.bookId ? await dbGet('books', a2.bookId) : null;
+  if (had2 && had2.full && had2.folderId === chk.folder.id) {
+    if (here()) { curBook = had2; reqFreeUrl(); backToFull(); }
+    return;
+  }
   const box = it.box && typeof it.box === 'object' ? it.box : null;
   const t = it.template;
   const bk = {
@@ -2298,6 +2313,8 @@ async function openFullFromRequest(rid) {
   };
   await dbPut('books', bk);
   await setAnswered(rid, { bookId: bk.id, ready: false, uploaded: null });
+  // Checked and kept: the next tap opens it at once, even if she has moved on.
+  if (!here()) return;
   curBook = bk;
   reqFreeUrl();
   backToFull();
@@ -2512,7 +2529,7 @@ async function fullSetGrade(k, g) {
   await leaveFull();
   bk.grades = { ...(bk.grades || {}), [k]: g };
   await fullChanged(bk);
-  renderFull();
+  await renderFull();
 }
 async function fullToggleFlag(k, f) {
   const bk = curBook;
@@ -2523,7 +2540,7 @@ async function fullToggleFlag(k, f) {
   if (set.has(f)) set.delete(f); else set.add(f);
   bk.flags = { ...(bk.flags || {}), [k]: FULL_FLAGS[k].filter(x => set.has(x)) };
   await fullChanged(bk);
-  renderFull();
+  await renderFull();
 }
 // "This book is different": the other list, with a reason. Every photo is kept;
 // one file name per shot number, so a switch never leaves two files for a shot.
@@ -2564,7 +2581,7 @@ $('#btnFlSwitchGo').onclick = async () => {
   bk.template = to;
   bk.templateWhy = to === bk.askedTemplate ? '' : k === 'other' ? 'other: ' + typed : FULL_WORDS.switchWhy[to];
   await fullChanged(bk);
-  renderFull();
+  await renderFull();
   toast(FULL_WORDS.templates[to] + ' ✓');
 };
 function paintFullUpload(bk, t) {
@@ -2784,7 +2801,9 @@ async function uploadFull(bk) {
       await dbPut('books', bk);
       kids = await folderChildren(fid);
     }
-    // 3. Only files not sent yet, or changed since they were sent, two at a time.
+    // 3. Only files not sent yet, or changed since they were sent: the photos two at
+    //    a time, then the copyright page's words (scope §6.1 step 6: new files, then
+    //    the text, then book.json).
     const files = fullFiles(bk, shots, chk.words);
     const have = {};
     kids.forEach(k => { (have[k.name] = have[k.name] || []).push(k.id); });
@@ -2792,20 +2811,25 @@ async function uploadFull(bk) {
     bk.fileIds = bk.fileIds || {};
     const todo = files.filter(f => !(bk.sent[f.name] === f.when && (have[f.name] || []).indexOf(bk.fileIds[f.name]) >= 0));
     await setUpload(bk, { done: files.length - todo.length, total: files.length + 1 });
-    let next = 0, failed = null, paused = false;
-    const worker = async () => {
-      while (next < todo.length && !failed && !paused) {
-        if (!tokenFresh()) { paused = true; break; }
-        const f = todo[next++];
-        try {
-          const up = await uploadFile(fid, f.name, f.mime, f.blob);
-          if (up && up.id) bk.fileIds[f.name] = up.id;
-          bk.sent[f.name] = f.when;
-          await setUpload(bk, { done: bk.upload.done + 1 });
-        } catch (e) { failed = e; }
-      }
+    let failed = null, paused = false;
+    const send = async list => {
+      let next = 0;
+      const worker = async () => {
+        while (next < list.length && !failed && !paused) {
+          if (!tokenFresh()) { paused = true; break; }
+          const f = list[next++];
+          try {
+            const up = await uploadFile(fid, f.name, f.mime, f.blob);
+            if (up && up.id) bk.fileIds[f.name] = up.id;
+            bk.sent[f.name] = f.when;
+            await setUpload(bk, { done: bk.upload.done + 1 });
+          } catch (e) { failed = e; }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(UPLOAD_PARALLEL, list.length) }, worker));
     };
-    await Promise.all(Array.from({ length: Math.min(UPLOAD_PARALLEL, todo.length) }, worker));
+    await send(todo.filter(f => !f.text));
+    if (!failed && !paused) await send(todo.filter(f => f.text));
     if (failed) throw failed;
     if (paused) { await setUpload(bk, { state: 'paused' }); return; }
     // 4. book.json last, in place of the one it read, which `previous` keeps whole.
