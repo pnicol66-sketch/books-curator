@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-164348';
+const APP_VERSION = '20261002-165123';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -55,8 +55,10 @@ const BOOK_WORDS = { id: '13', name: 'Copyright Verbatim' };
  * by id) and never makes one; 01 and 12 stay as they were sent (locked, never
  * sent again). Shot numbers and file names are permanent from the first upload:
  * one file name per shot number, whatever the template. */
-// Every word the client sees that came with full capture, in one place, so the
-// owner can change the wording after his yes (F20) without hunting through code.
+// Every word the client sees that came with full capture is here, in FULL_WORDS,
+// and (each shot's label, camera tip and loupe question, and the group headings) in
+// the checklist table FULL_TEMPLATES just below: the owner can change the wording
+// after his yes (F20) without touching code. File names (FULL_NAMES) never change.
 const FULL_WORDS = {
   wholeBook: n => `Whole book - ${n} photos`,
   twoPhotos: '2 photos',
