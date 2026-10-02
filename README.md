@@ -63,9 +63,13 @@ at any time from Drive itself. Declining is remembered too.
 Everything (photos, labels, settings) is stored locally in the browser on the
 phone. Photos go only to your own Google Drive, when you explicitly upload. To show
 your curator's requests, the app sends the Google Drive ids of folders it created
-(no photos, no names) to the curator's request service at script.google.com, and
+(no photos, no names) and which kinds of request this version can answer to the
+curator's request service at script.google.com, and
 receives the author, title, where to find each book and what to photograph. It also
-tells the service which requests the phone has received. See
+tells the service which requests the phone has received. When the curator asks for a
+whole book, the app reads back that book's record (book.json) from your own Drive, and
+any earlier photographs of another book in its folder are moved into a "_not this book"
+folder inside it; nothing is deleted. See
 [privacy.html](privacy.html) and [terms.html](terms.html).
 
 ## Developer notes

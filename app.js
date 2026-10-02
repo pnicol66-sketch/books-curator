@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-185637';
+const APP_VERSION = '20261002-193209';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -70,7 +70,8 @@ const FULL_WORDS = {
   cant: 'Can\'t take this one',
   cantWhy: { 'not-on-book': 'Not on this book', missing: 'Missing or torn off', other: 'Other' },
   cantOther: 'Say why',
-  different: 'This book is different',
+  // The link that switches lists names the other list (owner, 2 Oct 2026), keyed by the list it switches to.
+  switchLink: { pb: "It's a paperback", hc: 'It has hard covers and a jacket' },
   notSure: 'Not sure',
   notSureLine: 'Your curator will judge it from the photos.',
   driveFull: 'Your Google Drive is full',
@@ -1848,10 +1849,14 @@ function reqKind(it) {
   if (t === 'Full capture' && FULL_TEMPLATES[it.template]) return 'full';
   return 'other';
 }
-// The line under the title on the list: how many photos the request asks for.
-function reqKindLine(it) {
+// The line under the title on the list: how many photos the book needs, by the list she is
+// using (after a switch, hers; owner, 2 Oct 2026), else the one the request asks for. A
+// record this request will take over keeps only her own switch, as the takeover does.
+function reqKindLine(it, rec) {
   const k = reqKind(it);
-  return k === 'spot' ? FULL_WORDS.twoPhotos : k === 'full' ? FULL_WORDS.wholeBook(fullRequiredCount(it.template)) : '';
+  const hers = rec && FULL_TEMPLATES[rec.template] && (rec.requestId === it.rid || rec.templateWhy);
+  const t = hers ? rec.template : it.template;
+  return k === 'spot' ? FULL_WORDS.twoPhotos : k === 'full' ? FULL_WORDS.wholeBook(fullRequiredCount(t)) : '';
 }
 async function renderReqCard() {
   const card = $('#reqCard');
@@ -1916,7 +1921,7 @@ async function openRequests() {
     const row = document.createElement('button');
     row.className = 'reqitem ' + st.key;
     row.dataset.rid = it.rid;
-    const kl = reqKindLine(it);
+    const kl = reqKindLine(it, (answered[it.rid] && books[answered[it.rid].bookId]) || taken);
     row.innerHTML = `<div class="rq-t">${esc(it.title || '(no title)')}</div><div class="rq-a">${esc(it.author || '')}</div>` +
       (kl ? `<div class="rq-k">${esc(kl)}</div>` : '') +
       `<div class="rq-w">${esc(it.where || '')}</div><div class="rq-s">${esc(st.text)}</div>`;
@@ -2620,7 +2625,7 @@ async function renderFull() {
   $('#flNoteWrap').classList.toggle('hidden', !bk.note);
   $('#btnFlDifferent').classList.toggle('hidden', !!bk.note);
   $('#flKind').textContent = FULL_WORDS.templates[bk.template] || '';
-  $('#btnFlSwitch').textContent = FULL_WORDS.different;
+  $('#btnFlSwitch').textContent = FULL_WORDS.switchLink[bk.template === 'hc' ? 'pb' : 'hc'];
   $('#flSwitch').classList.add('hidden');
   const T = FULL_TEMPLATES[bk.template];
   const list = $('#flList');
