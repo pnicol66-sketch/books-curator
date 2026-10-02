@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-171808';
+const APP_VERSION = '20261002-171852';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -49,7 +49,7 @@ const BOOK_SHOTS = [
 ];
 const BOOK_WORDS = { id: '13', name: 'Copyright Verbatim' };
 
-/* ---------- full capture: the whole book (scope Appendix C, frozen 2 Oct 2026) ----------
+/* ---------- full capture: the whole book ----------
  * The curator asks for every photo of a book whose two spot-check photos are
  * filed. The phone adds to that book's own folder (named by the request, checked
  * by id) and never makes one; 01 and 12 stay as they were sent (locked, never
@@ -57,8 +57,8 @@ const BOOK_WORDS = { id: '13', name: 'Copyright Verbatim' };
  * one file name per shot number, whatever the template. */
 // Every word the client sees that came with full capture is here, in FULL_WORDS,
 // and (each shot's label, camera tip and loupe question, and the group headings) in
-// the checklist table FULL_TEMPLATES just below: the owner can change the wording
-// after his yes (F20) without touching code. File names (FULL_NAMES) never change.
+// the checklist table FULL_TEMPLATES just below, so the wording can change without
+// touching the code around it. File names (FULL_NAMES) never change.
 const FULL_WORDS = {
   wholeBook: n => `Whole book - ${n} photos`,
   twoPhotos: '2 photos',
@@ -92,8 +92,7 @@ const FULL_WORDS = {
   switchGo: 'Switch',
   cancel: 'Cancel',
   gradeHeads: { jacket: 'The jacket', book: 'The book' },
-  // One plain line per grade, in our own words (the source glossary is named in
-  // the build report; F20 (2)).
+  // One plain line per grade, in our own words.
   gradeLines: {
     F: 'Fine: like new. It may have been read, but it has no faults.',
     NF: 'Near Fine: almost Fine, with one or two very small faults.',
@@ -1865,7 +1864,7 @@ async function openRequests() {
     row.className = 'reqitem started';
     row.dataset.book = bk.id;
     if (bk.full) {
-      // Filed, withdrawn or closed: nothing more goes up for it (scope §2.3).
+      // Filed, withdrawn or closed: nothing more goes up for it.
       row.innerHTML = `<div class="rq-t">${esc(bk.title || '(no title)')}</div><div class="rq-a">${esc(bk.author || '')}</div>` +
         `<div class="rq-s">${esc(bk.upload && bk.upload.state === 'uploading' ? uploadLabel(bk) : FULL_WORDS.closed)}</div>` +
         '<div class="row2" style="margin-top:10px"><button class="secondary danger st-del">Delete</button></div>';
@@ -2185,7 +2184,7 @@ async function queueBook(bk) {
  * (root, bin, the row's Book ID in its book.json, 01 and 12 listed) before
  * anything else and never makes a folder (never bookFolderFor). 01 and 12 stay
  * locked: shown as "Sent earlier", never sent again. New files sit beside the
- * old ones under the folder's own filing words (rule 2). book.json goes last,
+ * old ones under the folder's own filing words. book.json goes last,
  * with the spot-check record kept whole beside it (book.spot.json) and in
  * `previous`. One record per request on this phone, pointed at from answered[rid].
  */
@@ -2510,7 +2509,7 @@ async function fullSetSkip(id, k, typed, keep) {
     if (inp && !inp.value) inp.focus();
   }
 }
-// A grade picker (F20: one plain line per grade, plus Not sure) and its flag chips.
+// A grade picker (one plain line per grade, plus Not sure) and its flag chips.
 function fullGradeBox(bk, k) {
   const box = document.createElement('div');
   box.className = 'fl-grade';
@@ -2781,7 +2780,7 @@ async function uploadFull(bk) {
     const fid = chk.folder.id, cur = chk.book.m;
     let kids = await folderChildren(fid);
     // 1. The spot-check record, kept whole beside the new one: book.spot.json, written
-    //    only when absent and never replaced (I7).
+    //    only when absent and never replaced.
     let spotM = null;
     const spotKid = kids.filter(k => k.name === SPOT_JSON);
     if (spotKid.length) {
@@ -2797,7 +2796,7 @@ async function uploadFull(bk) {
       if (text != null) await createFile(fid, SPOT_JSON, 'application/json', new Blob([text], { type: 'application/json' }));
       else console.warn('full capture: no spot-check record to keep for', bk.requestId);
     }
-    // 2. F24: the files of an earlier capture that book.json still lists (one the
+    // 2. The files of an earlier capture that book.json still lists (one the
     //    curator refused as "Not this book") go into a sub-folder before anything
     //    new goes up: every file it lists that book.spot.json does not. Never 01 or
     //    12, never a file this capture sent. Done once per earlier capture.
@@ -2817,8 +2816,7 @@ async function uploadFull(bk) {
       kids = await folderChildren(fid);
     }
     // 3. Only files not sent yet, or changed since they were sent: the photos two at
-    //    a time, then the copyright page's words (scope §6.1 step 6: new files, then
-    //    the text, then book.json).
+    //    a time, then the copyright page's words, then book.json.
     const files = fullFiles(bk, shots, chk.words);
     const have = {};
     kids.forEach(k => { (have[k.name] = have[k.name] || []).push(k.id); });
@@ -2872,7 +2870,7 @@ async function uploadFull(bk) {
     if ($('#scr-full').classList.contains('active') && curBook && curBook.id === bk.id) renderFull();
   }
 }
-// book.json of a full capture (scope C2), written LAST.
+// book.json of a full capture, written LAST.
 async function writeFullManifest(folder, bk, files, chk) {
   const started = bk.startedAt || bk.created, finished = bk.finishedAt || Date.now();
   const r = bk.shelfRef || {}, t = bk.template, T = FULL_TEMPLATES[t];
