@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-200541';
+const APP_VERSION = '20261002-200903';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -84,10 +84,10 @@ const FULL_WORDS = {
   chooseGrade: 'Choose how good the book is.',
   noLonger: 'Your curator no longer asks for this book',
   closed: 'Your curator no longer asks for this book. Delete it from this phone when you like.',
-  // New words, awaiting the owner's yes: in place of `closed` when a new request for
-  // the same book (the same folder and Book ID) is on the list above.
+  // In place of `closed` when a new request for the same book (the same folder and Book
+  // ID) is on the list above (owner's yes, 2 Oct 2026).
   askedAgain: 'Your curator has asked for this book again (above). These are the photos for the earlier request; delete them from this phone when you like.',
-  // New words, still to be approved before they ship: the upload asks the curator's
+  // Owner's yes, 2 Oct 2026: the upload asks the curator's
   // list itself before it sends; a book whose request has left the list stays on the
   // phone until she deletes it; the first opening needs the internet.
   cantCheck: 'Could not check with your curator just now. Try the upload again in a moment.',
@@ -117,8 +117,8 @@ const FULL_WORDS = {
     FR: 'Fair: well worn. All the text is there, but an endpaper or similar may be missing.',
     P: 'Poor: so worn that only the text is worth keeping (a reading copy).',
   },
-  // The same seven grades for the jacket, in the same plain style (new words, still
-  // to be approved before they ship): a jacket is judged by its tears, chips,
+  // The same seven grades for the jacket, in the same plain style (owner's yes, 2 Oct
+  // 2026): a jacket is judged by its tears, chips,
   // missing pieces, rubbing and fading, not by its text.
   jacketGradeLines: {
     F: 'Fine: like new. No tears, chips, rubbing or fading.',

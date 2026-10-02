@@ -70,8 +70,11 @@ curator's request service at script.google.com, and
 receives the author, title, where to find each book and what to photograph. It also
 tells the service which requests the phone has received. When the curator asks for a
 whole book, the app reads back that book's record (book.json) from your own Drive, and
-any earlier photographs of another book in its folder are moved into a "_not this book"
-folder inside it; nothing is deleted. See
+asks the request service again when you upload it, to check that the curator still asks
+for it. When the curator asks again for a whole book, the app first moves the photographs
+it sent for the earlier request into a folder inside the book's folder named
+"_not this book" with the date (for example when they were of another book); nothing is
+deleted. See
 [privacy.html](privacy.html) and [terms.html](terms.html).
 
 ## Developer notes

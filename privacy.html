@@ -76,9 +76,10 @@ and <a href="#libraries">Private library websites</a>.</p>
   with small text files of the details: the shelf label or the requested book's author
   and title, the notes, tags, count and copyright-page words you entered, the condition
   you chose, your name, and when you took the photographs. You own those
-  files. If your curator finds that earlier photographs in a book's folder were of
-  another book, the app moves them into a folder inside it named "_not this book" with
-  the date; nothing is deleted.</li>
+  files. When your curator asks again for a whole book, the app first moves the
+  photographs it sent for the earlier request into a folder inside the book's folder
+  named "_not this book" with the date (for example when they were of another book);
+  nothing is deleted.</li>
 </ul>
 
 <h2>What the app can see in your Google Drive</h2>
@@ -115,7 +116,8 @@ the prompt shows the folder's name and the address.</p>
   <li><code>script.google.com</code> — your curator's request service. Once you have
   uploaded a shelf, the app asks it whether your curator would like any of your books
   photographed: automatically, at most once a minute, when the app opens or comes back
-  to the screen. It sends only the Google Drive ids of the folders the app created on
+  to the screen, and when you upload a whole book, to check that your curator still asks
+  for it. It sends only the Google Drive ids of the folders the app created on
   your Drive and which kinds of request this version of the app can answer, and tells
   the service which requests your phone has received (your
   curator's list records that date). The answer comes back from
