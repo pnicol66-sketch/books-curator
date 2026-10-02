@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-165123';
+const APP_VERSION = '20261002-165416';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -2320,13 +2320,19 @@ function fullTally(bk, shots) {
 }
 // May the book be changed now? Not while it is queued or going up.
 function fullEditable(bk) { return !!bk && !(uploadActive(bk) && bk.upload.state !== 'paused'); }
-// Anything kept, deleted, marked or chosen: the book is no longer what was sent.
-// The upload's own bookkeeping is taken from the stored record first, so a screen
-// that was open while files went up never writes back an older copy of it.
-async function fullChanged(bk) {
+// The upload works on its own copy of the record and stores what it sent, the
+// files' ids and any move aside. Before the screen's copy is stored again, those
+// are taken from the stored record, so a screen that stayed open while files went
+// up never writes back an older copy (which would send files again, or move this
+// capture's own files aside as if they were a refused one's).
+async function fullSyncStored(bk) {
   const stored = await dbGet('books', bk.id);
   if (stored) { bk.sent = stored.sent || {}; bk.fileIds = stored.fileIds || {}; bk.aside = stored.aside || null; bk.upload = stored.upload; }
   if (!bk.upload) delete bk.upload;
+}
+// Anything kept, deleted, marked or chosen: the book is no longer what was sent.
+async function fullChanged(bk) {
+  await fullSyncStored(bk);
   const t = fullTally(bk, await shotsFor(bk.id));
   bk.finishedAt = t.ready ? Date.now() : null;
   bk.uploaded = null;
@@ -2586,7 +2592,7 @@ async function openFullCamera(shotId) {
   if ($('#scr-full').classList.contains('active')) await leaveFull();
   // Capture minutes time the shooting: the clock starts when the camera first opens
   // on this book with no photo yet.
-  if (!(await shotsFor(bk.id)).some(x => x.blob)) { bk.startedAt = Date.now(); await dbPut('books', bk); }
+  if (!(await shotsFor(bk.id)).some(x => x.blob)) { await fullSyncStored(bk); bk.startedAt = Date.now(); await dbPut('books', bk); }
   capT = { kind: 'full', shot: shotId };
   torchWant = !!s.torch;
   freeGate();
@@ -2653,6 +2659,7 @@ async function startFullUpload(bk, btn) {
     btn.textContent = 'Signing in to Google…';
     await getToken();
     await askPersist();
+    await fullSyncStored(bk);
     if (paused) await setUpload(bk, { state: 'queued', error: '' });
     else {
       bk.upload = { state: 'queued', done: 0, total: 1, queued: Date.now(), error: '' };
