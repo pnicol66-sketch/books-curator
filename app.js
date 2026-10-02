@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-185610';
+const APP_VERSION = '20261002-185637';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -83,6 +83,17 @@ const FULL_WORDS = {
   chooseGrade: 'Choose how good the book is.',
   noLonger: 'Your curator no longer asks for this book',
   closed: 'Your curator no longer asks for this book. Delete it from this phone when you like.',
+  // New words, still to be approved before they ship: the upload asks the curator's
+  // list itself before it sends; a book whose request has left the list stays on the
+  // phone until she deletes it; the first opening needs the internet.
+  cantCheck: 'Could not check with your curator just now. Try the upload again in a moment.',
+  tryAgain: '☁ Try the upload again',
+  onPhone: 'On this phone',
+  onPhoneSent: 'Sent to your curator. The photos are in your Google Drive; delete them from this phone when you like.',
+  deleteUnsent: 'This book was never sent to your curator. Delete its photos from this phone anyway?',
+  deleteChanged: 'Your last changes to this book were not sent. Delete it from this phone anyway?',
+  deleteSent: 'Delete this book\'s photos from this phone? The ones you sent stay in your Google Drive.',
+  firstOpenOnline: 'Opening a whole book needs the internet the first time. Try again when you are online; after that you can take the photos offline.',
   // The template line on the request and the checklist, by template code.
   templates: { hc: 'Hardcover with its jacket', pb: 'Paperback' },
   // "This book is different": switch to the other list, with a reason.
@@ -272,6 +283,26 @@ async function dbGet(store, key) { return reqP((await db()).transaction(store).o
 async function dbAll(store) { return reqP((await db()).transaction(store).objectStore(store).getAll()); }
 async function dbDel(store, key) { return reqP((await db()).transaction(store, 'readwrite').objectStore(store).delete(key)); }
 async function dbClear(store) { return reqP((await db()).transaction(store, 'readwrite').objectStore(store).clear()); }
+// Read, change and store one record in a single step. A record that is gone stays
+// gone (fn is not called), and fn returning null stores nothing; returns what was
+// stored, or null.
+async function dbPatch(store, key, fn) {
+  const tx = (await db()).transaction(store, 'readwrite'), os = tx.objectStore(store);
+  return new Promise((res, rej) => {
+    let out = null;
+    const g = os.get(key);
+    g.onsuccess = () => {
+      if (!g.result) return;
+      const next = fn(g.result);
+      if (next === null) return;
+      out = next || g.result;
+      os.put(out);
+    };
+    tx.oncomplete = () => res(out);
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error || new Error('Could not save on this phone'));
+  });
+}
 async function photosFor(shelfId) {
   const all = await reqP((await db()).transaction('photos').objectStore('photos')
     .getAll(IDBKeyRange.bound([shelfId, 0], [shelfId, 999])));
@@ -1359,7 +1390,7 @@ function uploadLabel(sh) {
   if (!u) return '';
   if (u.state === 'queued') return '⏳ Waiting to upload';
   if (u.state === 'uploading') return `☁ Uploading ${u.done}/${u.total}…`;
-  if (u.state === 'paused') return '⏸ Upload paused — sign in from the home screen';
+  if (u.state === 'paused') return u.why === 'check' ? '⏸ ' + FULL_WORDS.cantCheck : '⏸ Upload paused — sign in from the home screen';
   if (u.state === 'failed') return '⚠ Upload failed — ' + (u.error || 'tap ↻ to retry');
   return '';
 }
@@ -1377,7 +1408,13 @@ async function uploadQueue() {
 }
 async function setUpload(sh, patch) {
   Object.assign(sh.upload, patch);
-  await dbPut(storeOf(sh), sh);
+  // Why a whole book paused ('check': the curator's list could not be read) lasts
+  // only until its state changes.
+  if (patch.state && !('why' in patch)) delete sh.upload.why;
+  // A whole book's upload stores only its own part of the record (fullStoreUpload),
+  // so a change made on the checklist meanwhile is never written over.
+  if (sh.full) await fullStoreUpload(sh);
+  else await dbPut(storeOf(sh), sh);
   if (storeOf(sh) === 'shelves' && curShelf && curShelf.id === sh.id) curShelf.upload = sh.upload;
   if (storeOf(sh) === 'books' && curBook && curBook.id === sh.id) curBook.upload = sh.upload;
   refreshUploadCards();
@@ -1409,7 +1446,10 @@ async function pumpUploads() {
   uploadPumpRunning = true;
   try {
     for (;;) {
-      const queue = await uploadQueue();
+      // A paused whole book waits for her tap (Upload on its checklist, or the home
+      // screen's sign-in): she may be changing it, and a run started on its own would
+      // send what it read before her change.
+      const queue = (await uploadQueue()).filter(s => !(s.full && s.upload.state === 'paused'));
       if (!queue.length) break;
       if (!tokenFresh()) {
         for (const sh of queue) if (sh.upload.state !== 'paused') await setUpload(sh, { state: 'paused' });
@@ -1418,7 +1458,9 @@ async function pumpUploads() {
       }
       const sh = queue[0];
       await (sh.kind === 'book' ? (sh.full ? uploadFull(sh) : uploadBook(sh)) : uploadShelf(sh));
-      if (sh.upload && sh.upload.state === 'paused') break;
+      // A sign-in that ran out pauses everything; a whole book paused because the
+      // curator's list could not be read pauses only itself.
+      if (sh.upload && sh.upload.state === 'paused' && sh.upload.why !== 'check') break;
     }
   } finally {
     uploadPumpRunning = false;
@@ -1843,9 +1885,18 @@ async function openRequests() {
   const list = $('#rqsList');
   list.innerHTML = '';
   const items = (c.items || []).slice();
-  // Books started here whose request the list no longer returns (withdrawn before
-  // they went up): kept, with Upload and Delete, so no photo is stranded.
-  const started = allBooks.filter(b => !b.uploaded && !items.some(it => it.rid === b.requestId)).sort((a, b) => a.created - b.created);
+  const liveRids = items.map(it => it.rid);
+  // Two-photo books started here whose request the list no longer returns (withdrawn
+  // before they went up): kept, with Upload and Delete, so no photo is stranded.
+  const started = allBooks.filter(b => !b.full && !b.uploaded && liveRids.indexOf(b.requestId) < 0).sort((a, b) => a.created - b.created);
+  // Whole books on this phone whose request has left the list (filed, withdrawn or
+  // closed), sent or not: listed with Delete, so their photos never fill the phone.
+  // One that a new request for the same book will take over is left to it. Only
+  // once the list has been read at least once.
+  const hasRecord = it => !!(answered[it.rid] && books[answered[it.rid].bookId]);
+  const takers = items.filter(it => reqKind(it) === 'full' && !hasRecord(it));
+  const onPhone = !c.fetchedAt ? [] : allBooks.filter(b => b.full && liveRids.indexOf(b.requestId) < 0 &&
+    !takers.some(it => fullAdoptable(b, it, liveRids))).sort((a, b) => a.created - b.created);
   if (!items.length) list.innerHTML = '<p class="empty">Nothing waiting.<br>Your curator\'s requests appear here.</p>';
   // Grouped by shelf, in the order the shelves were shot; within a shelf by photo, then
   // left to right; requests with no spine marked (words only) after the marked ones.
@@ -1857,7 +1908,11 @@ async function openRequests() {
   for (const it of items) {
     const g = groupOf(it);
     if (g !== cur) { cur = g; const h = document.createElement('h2'); h.className = 'sect'; h.textContent = g; list.appendChild(h); }
-    const st = reqState(it, answered, books);
+    let st = reqState(it, answered, books);
+    // A whole book this request will take over (its earlier request was replaced):
+    // the photos already taken count.
+    const taken = st.key === 'todo' && takers.indexOf(it) >= 0 ? fullAdoptFor(it, allBooks, liveRids) : null;
+    if (taken && taken.progress && taken.progress.started) st = { key: 'todo', text: FULL_WORDS.progress(taken.progress.done, taken.progress.total) };
     const row = document.createElement('button');
     row.className = 'reqitem ' + st.key;
     row.dataset.rid = it.rid;
@@ -1868,22 +1923,14 @@ async function openRequests() {
     row.onclick = () => openRequest(it.rid);
     list.appendChild(row);
   }
-  if (!started.length) return;
-  const h = document.createElement('h2'); h.className = 'sect'; h.textContent = 'No longer asked for';
-  list.appendChild(h);
+  if (started.length) {
+    const h = document.createElement('h2'); h.className = 'sect'; h.textContent = 'No longer asked for';
+    list.appendChild(h);
+  }
   for (const bk of started) {
     const row = document.createElement('div');
     row.className = 'reqitem started';
     row.dataset.book = bk.id;
-    if (bk.full) {
-      // Filed, withdrawn or closed: nothing more goes up for it.
-      row.innerHTML = `<div class="rq-t">${esc(bk.title || '(no title)')}</div><div class="rq-a">${esc(bk.author || '')}</div>` +
-        `<div class="rq-s">${esc(bk.upload && bk.upload.state === 'uploading' ? uploadLabel(bk) : FULL_WORDS.closed)}</div>` +
-        '<div class="row2" style="margin-top:10px"><button class="secondary danger st-del">Delete</button></div>';
-      row.querySelector('.st-del').onclick = () => deleteBook(bk.id, () => openRequests());
-      list.appendChild(row);
-      continue;
-    }
     row.innerHTML = `<div class="rq-t">${esc(bk.title || '(no title)')}</div><div class="rq-a">${esc(bk.author || '')}</div>` +
       `<div class="rq-s">${esc(bk.upload ? uploadLabel(bk) : 'Upload it if both photos were taken; otherwise delete it.')}</div>` +
       '<div class="row2" style="margin-top:10px"><button class="secondary st-up">☁ Upload</button><button class="secondary danger st-del">Delete</button></div>';
@@ -1891,6 +1938,21 @@ async function openRequests() {
     up.disabled = (uploadActive(bk) && bk.upload.state !== 'paused') || !bookReady(await shotsFor(bk.id));
     if (token !== openRequests.n) return;   // a newer draw of this screen has started
     up.onclick = () => startBookUpload(bk, up);
+    row.querySelector('.st-del').onclick = () => deleteBook(bk.id, () => openRequests());
+    list.appendChild(row);
+  }
+  if (token !== openRequests.n || !onPhone.length) return;
+  const h2 = document.createElement('h2'); h2.className = 'sect'; h2.textContent = FULL_WORDS.onPhone;
+  list.appendChild(h2);
+  for (const bk of onPhone) {
+    // Nothing more goes up for it; Delete says first whether it was ever sent.
+    const row = document.createElement('div');
+    row.className = 'reqitem started onphone';
+    row.dataset.book = bk.id;
+    const line = bk.upload && bk.upload.state === 'uploading' ? uploadLabel(bk) : bk.uploaded ? FULL_WORDS.onPhoneSent : FULL_WORDS.closed;
+    row.innerHTML = `<div class="rq-t">${esc(bk.title || '(no title)')}</div><div class="rq-a">${esc(bk.author || '')}</div>` +
+      `<div class="rq-s">${esc(line)}</div>` +
+      '<div class="row2" style="margin-top:10px"><button class="secondary danger st-del">Delete</button></div>';
     row.querySelector('.st-del').onclick = () => deleteBook(bk.id, () => openRequests());
     list.appendChild(row);
   }
@@ -2142,7 +2204,11 @@ async function deleteBook(id, then) {
   const bk = await dbGet('books', id);
   if (!bk) return then();
   if (bk.upload && bk.upload.state === 'uploading') return toast('Wait for the upload to finish');
-  if (!confirm('This book answers a request from your curator; delete it from the phone anyway?')) return;
+  // A whole book says first whether it was ever sent (book.json written), and
+  // whether its last changes were.
+  const ask = !bk.full ? 'This book answers a request from your curator; delete it from the phone anyway?'
+    : bk.uploaded ? FULL_WORDS.deleteSent : bk.manifestAt ? FULL_WORDS.deleteChanged : FULL_WORDS.deleteUnsent;
+  if (!confirm(ask)) return;
   stopVoice();
   for (const s of await shotsFor(id)) await dbDel('shots', [id, s.shotId]);
   await dbDel('books', id);
@@ -2224,6 +2290,66 @@ function listedNames(m) {
     .map(p => p && typeof p.file === 'string' ? p.file : '').filter(Boolean);
 }
 function localDay() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+// A whole book on this phone that a new request may take over: its own request has
+// left the list (the curator withdrew it and asked again, say to fix the template or
+// the words), the new one names the same folder and the same Book ID, and it never
+// wrote book.json, so the curator never saw it and never refused it ("Not this book"
+// refuses only a capture he saw). Not while it is going up.
+function fullAdoptable(rec, it, liveRids) {
+  return !!rec && !!rec.full && !rec.manifestAt && !rec.uploaded && rec.requestId !== it.rid &&
+    liveRids.indexOf(rec.requestId) < 0 && !!it.folderId && rec.folderId === String(it.folderId) &&
+    !!rec.requestBookId && rec.requestBookId === String(it.bookId || '') &&
+    !(rec.upload && /^(queued|uploading)$/.test(rec.upload.state));
+}
+// The newest such record, if any.
+function fullAdoptFor(it, allBooks, liveRids) {
+  return allBooks.filter(b => fullAdoptable(b, it, liveRids)).sort((a, b) => b.created - a.created)[0] || null;
+}
+// What a whole-book record takes from its request and its checked folder.
+function fullFromItem(it, chk) {
+  const box = it.box && typeof it.box === 'object' ? it.box : null;
+  return {
+    author: String(it.author || ''), title: String(it.title || ''),
+    filing: { words: chk.words, author: chk.author, title: chk.title },
+    requestId: it.rid, requestBookId: String(it.bookId || ''), folderId: chk.folder.id, folderName: chk.folder.name,
+    shelfRef: { shelfId: String(it.shelfId || ''), shelfFolderId: it.key, file: box ? String(box.file || '') : '',
+      box: box ? [box.x, box.y, box.w, box.h] : null, where: String(it.where || '') },
+    asked: String(it.asked || ''),
+  };
+}
+// No connection (or Google's sign-in could not load): the browser's own words are
+// no help to her.
+function isOffline(e) {
+  const m = String((e && e.message) || e || '');
+  return navigator.onLine === false || (e instanceof TypeError) || /offline|Failed to fetch|Load failed|NetworkError/i.test(m);
+}
+// Is this request still asked for? Asked of the request service itself, never the
+// list kept on this phone (that one may be minutes old, and a photo sent after the
+// curator filed the book would replace the one he filed): 'live', 'gone' (the
+// service answered and does not serve it), or 'unknown' (no good answer, or the
+// service could not open the curator's sheet just now).
+async function fullStillAsked(bk) {
+  const key = String((bk.shelfRef && bk.shelfRef.shelfFolderId) || '');
+  if (!requestsUrl() || !REQ_KEY_RE.test(key)) return 'unknown';
+  let rep = null;
+  for (let a = 1; a <= 2 && !rep; a++) {
+    rep = await requestsPost({ op: 'list', v: 1, ids: [key], types: REQ_TYPES });
+    if (!(rep && rep.ok === true && Array.isArray(rep.items))) {
+      rep = null;
+      if (a < 2) await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+  if (!rep) return 'unknown';
+  if (Array.isArray(rep.unavailable) && rep.unavailable.indexOf(key) >= 0) return 'unknown';
+  return rep.items.some(x => reqItemOk(x) && x.rid === bk.requestId && x.key === key) ? 'live' : 'gone';
+}
+// The service no longer serves it: take it off the list kept on this phone too.
+async function dropCachedRequest(rid) {
+  const c = await dbGet('kv', 'requests');
+  if (!c || !Array.isArray(c.items) || !c.items.some(x => x && x.rid === rid)) return;
+  await dbPut('kv', { ...c, items: c.items.filter(x => !x || x.rid !== rid) }, 'requests');
+  renderReqCard();
+}
 // The folder the request names: it opens with her sign-in and is not in the bin;
 // it sits in the root found from the shelf's own folder (by id, never the name in
 // Settings); its one book.json names this row (requestBookId) and lists 01 and 12.
@@ -2294,8 +2420,11 @@ async function openFullFromRequest(rid) {
   } catch (e) {
     console.error('full capture check', rid, (e && e.why) || e);
     if (!here()) return;
-    if (e && e.fullGone) note.textContent = FULL_WORDS.folderGone;
-    toast((e && e.message) || String(e), 6000);
+    // The first opening checks her folder in Drive; with no connection she is told
+    // so in plain words (once the checklist is on the phone, shooting works offline).
+    const msg = e && e.fullGone ? FULL_WORDS.folderGone : isOffline(e) ? FULL_WORDS.firstOpenOnline : (e && e.message) || String(e);
+    if (e && e.fullGone || msg === FULL_WORDS.firstOpenOnline) note.textContent = msg;
+    toast(msg, 6000);
     btn.disabled = false;
     btn.textContent = FULL_WORDS.shoot;
     return;
@@ -2308,23 +2437,47 @@ async function openFullFromRequest(rid) {
     if (here()) { curBook = had2; reqFreeUrl(); backToFull(); }
     return;
   }
-  const box = it.box && typeof it.box === 'object' ? it.box : null;
   const t = it.template;
-  const bk = {
-    id: Date.now().toString(36), kind: 'book', full: true, requestType: 'Full capture',
-    template: t, askedTemplate: t, templateWhy: '',
-    author: String(it.author || ''), title: String(it.title || ''),
-    filing: { words: chk.words, author: chk.author, title: chk.title },
-    requestId: rid, requestBookId: String(it.bookId || ''), folderId: chk.folder.id, folderName: chk.folder.name,
-    shelfRef: { shelfId: String(it.shelfId || ''), shelfFolderId: it.key, file: box ? String(box.file || '') : '',
-      box: box ? [box.x, box.y, box.w, box.h] : null, where: String(it.where || '') },
-    asked: String(it.asked || ''), note: '',
-    kept: chk.kept, skipped: {}, grades: { jacket: null, book: null }, flags: { jacket: [], book: [] },
-    operator: settings.operator || '', created: Date.now(), startedAt: Date.now(), finishedAt: null,
-    sent: {}, fileIds: {}, aside: null, progress: { done: 0, total: fullRequiredCount(t), started: false },
-  };
-  await dbPut('books', bk);
-  await setAnswered(rid, { bookId: bk.id, ready: false, uploaded: null });
+  // A whole book begun here under a request the curator has since replaced (same
+  // folder, same Book ID, never sent): this request takes it over with its photos and
+  // choices, so nothing is stranded and nothing is shot twice.
+  const live = ((((await dbGet('kv', 'requests')) || {}).items) || []).map(x => x && x.rid);
+  const old = fullAdoptFor(it, await dbAll('books'), live);
+  let bk = null;
+  if (old) {
+    const shots = await shotsFor(old.id);
+    let ready = false;
+    bk = await dbPatch('books', old.id, r => {
+      if (!fullAdoptable(r, it, live)) return null;
+      Object.assign(r, fullFromItem(it, chk));
+      r.kept = chk.kept;
+      r.askedTemplate = t;
+      // Her own "This book is different" stands; otherwise the list the request asks for.
+      if (!r.templateWhy || r.template === t) { r.template = t; r.templateWhy = ''; }
+      delete r.upload;
+      r.uploaded = null;
+      r.rev = (r.rev || 0) + 1;
+      const tl = fullTally(r, shots);
+      ready = tl.ready;
+      r.finishedAt = tl.ready ? (r.finishedAt || Date.now()) : null;
+      r.progress = { done: tl.done, total: tl.total, started: tl.started };
+      return r;
+    });
+    if (bk && bk.requestId === rid) await setAnswered(rid, { bookId: bk.id, ready, uploaded: null });
+    else bk = null;
+  }
+  if (!bk) {
+    bk = {
+      id: Date.now().toString(36), kind: 'book', full: true, requestType: 'Full capture',
+      template: t, askedTemplate: t, templateWhy: '',
+      ...fullFromItem(it, chk), note: '',
+      kept: chk.kept, skipped: {}, grades: { jacket: null, book: null }, flags: { jacket: [], book: [] },
+      operator: settings.operator || '', created: Date.now(), startedAt: Date.now(), finishedAt: null,
+      sent: {}, fileIds: {}, aside: null, progress: { done: 0, total: fullRequiredCount(t), started: false }, rev: 0,
+    };
+    await dbPut('books', bk);
+    await setAnswered(rid, { bookId: bk.id, ready: false, uploaded: null });
+  }
   // Checked and kept: the next tap opens it at once, even if she has moved on.
   if (!here()) return;
   curBook = bk;
@@ -2349,24 +2502,49 @@ function fullTally(bk, shots) {
 }
 // May the book be changed now? Not while it is queued or going up.
 function fullEditable(bk) { return !!bk && !(uploadActive(bk) && bk.upload.state !== 'paused'); }
-// The upload works on its own copy of the record and stores what it sent, the
-// files' ids and any move aside. Before the screen's copy is stored again, those
-// are taken from the stored record, so a screen that stayed open while files went
-// up never writes back an older copy (which would send files again, or move this
-// capture's own files aside as if they were a refused one's).
+// The upload and the checklist each work on their own copy of a whole book's record,
+// and each stores only its own part, in one step (dbPatch): the upload stores what
+// it sent, the files' ids, any move aside, its state and when it last wrote book.json
+// (FULL_UP_KEYS, and `uploaded` when it is done); the checklist stores everything
+// else. So neither ever writes back an older copy of the other's part (which would
+// send files again, move this capture's own files aside as if they were a refused
+// one's, or undo a change made while the files went up). Every change she makes
+// counts one more revision (`rev`); an upload that finds the revision moved goes
+// round again rather than calling the book Sent.
+const FULL_UP_KEYS = ['upload', 'sent', 'fileIds', 'aside', 'manifestAt'];
+function fullTakeUp(bk, rec) {
+  for (const k of FULL_UP_KEYS.concat(['uploaded', 'rev'])) { if (rec && k in rec) bk[k] = rec[k]; else delete bk[k]; }
+  bk.sent = bk.sent || {};
+  bk.fileIds = bk.fileIds || {};
+  if (!('aside' in bk)) bk.aside = null;
+}
 async function fullSyncStored(bk) {
   const stored = await dbGet('books', bk.id);
-  if (stored) { bk.sent = stored.sent || {}; bk.fileIds = stored.fileIds || {}; bk.aside = stored.aside || null; bk.upload = stored.upload; }
-  if (!bk.upload) delete bk.upload;
+  if (stored) fullTakeUp(bk, stored);
+}
+async function fullStoreUpload(bk) {
+  return dbPatch('books', bk.id, r => {
+    for (const k of FULL_UP_KEYS) { if (k in bk) r[k] = bk[k]; else delete r[k]; }
+    return r;
+  });
+}
+// The checklist's part; `changed` counts a new revision and means "not Sent".
+async function fullStoreScreen(bk, changed) {
+  const rec = await dbPatch('books', bk.id, r => {
+    const out = { ...bk };
+    for (const k of FULL_UP_KEYS.concat(['uploaded', 'rev'])) { if (k in r) out[k] = r[k]; else delete out[k]; }
+    if (changed) { out.uploaded = null; out.rev = (r.rev || 0) + 1; }
+    return out;
+  });
+  if (rec) fullTakeUp(bk, rec);
+  return rec;
 }
 // Anything kept, deleted, marked or chosen: the book is no longer what was sent.
 async function fullChanged(bk) {
-  await fullSyncStored(bk);
   const t = fullTally(bk, await shotsFor(bk.id));
   bk.finishedAt = t.ready ? Date.now() : null;
-  bk.uploaded = null;
   bk.progress = { done: t.done, total: t.total, started: t.started };
-  await dbPut('books', bk);
+  await fullStoreScreen(bk, true);
   await setAnswered(bk.requestId, { bookId: bk.id, ready: t.ready, uploaded: null });
   return t;
 }
@@ -2620,14 +2798,14 @@ function paintFullUpload(bk, t) {
   const up = uploadActive(bk), paused = !!(bk.upload && bk.upload.state === 'paused');
   const btn = $('#btnFlUpload');
   btn.disabled = !t.ready || (up && !paused) || !!bk.uploaded;
-  btn.textContent = paused ? '☁ Sign in to continue the upload' : up ? uploadLabel(bk) : bk.uploaded ? FULL_WORDS.sent
+  btn.textContent = paused ? (bk.upload.why === 'check' ? FULL_WORDS.tryAgain : '☁ Sign in to continue the upload') : up ? uploadLabel(bk) : bk.uploaded ? FULL_WORDS.sent
     : t.done < t.total ? FULL_WORDS.progress(t.done, t.total) : '☁ Upload to Google Drive';
   $('#flProgress').textContent = FULL_WORDS.progress(t.done, t.total);
   const lock = up && !paused;
   ['#inFlNote', '#inFlWords', '#btnFlNoteVoice', '#btnFlWordsVoice', '#btnFlDifferent', '#btnFlSwitch'].forEach(q => { $(q).disabled = lock; });
   $$('#flList .grow, #flList .chip, #flList .fl-other, #flList .fl-cant').forEach(x => { x.disabled = lock; });
   const T = FULL_TEMPLATES[bk.template];
-  $('#flStatus').textContent = bk.upload && bk.upload.state === 'failed' ? uploadLabel(bk)
+  $('#flStatus').textContent = bk.upload && (bk.upload.state === 'failed' || (paused && bk.upload.why === 'check')) ? uploadLabel(bk)
     : t.done === t.total && !t.gradesOk ? (T.grades.length > 1 ? FULL_WORDS.chooseGrades : FULL_WORDS.chooseGrade) : '';
   $('#flKeepOpen').classList.toggle('hidden', !!bk.uploaded && !up);
 }
@@ -2641,7 +2819,7 @@ async function openFullCamera(shotId) {
   if ($('#scr-full').classList.contains('active')) await leaveFull();
   // Capture minutes time the shooting: the clock starts when the camera first opens
   // on this book with no photo yet.
-  if (!(await shotsFor(bk.id)).some(x => x.blob)) { await fullSyncStored(bk); bk.startedAt = Date.now(); await dbPut('books', bk); }
+  if (!(await shotsFor(bk.id)).some(x => x.blob)) { bk.startedAt = Date.now(); await fullStoreScreen(bk, false); }
   capT = { kind: 'full', shot: shotId };
   torchWant = !!s.torch;
   freeGate();
@@ -2677,6 +2855,10 @@ function makeThumb(bmp, max = 200) {
   g.drawImage(bmp, 0, 0, c.width, c.height);
   return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('thumbnail')), 'image/jpeg', 0.8));
 }
+// A frame kept is never thrown away. Should an upload of this book be running all the
+// same (the camera opens only on a book that is not going up, and a paused one waits
+// for her tap), the change counts a new revision and that upload goes round again
+// before it says Sent.
 async function keepFullShot(shotId, bmp, blob) {
   const bk = curBook;
   let thumb = null;
@@ -2725,7 +2907,7 @@ async function startFullUpload(bk, btn) {
     if (paused) await setUpload(bk, { state: 'queued', error: '' });
     else {
       bk.upload = { state: 'queued', done: 0, total: 1, queued: Date.now(), error: '' };
-      await dbPut('books', bk);
+      await fullStoreUpload(bk);
     }
     if (curBook && curBook.id === bk.id) curBook = bk;
     toast(FULL_WORDS.keepOpen, 4000);
@@ -2775,17 +2957,27 @@ async function driveMove(fileId, from, to) {
     body: '{}',
   });
 }
+// The copyright words file. When the spot-check record already lists a words file of
+// its own (shot 13), this capture's words go into "... - 13 Copyright Verbatim (whole
+// book).txt", so the spot-check's file is never written over and book.spot.json keeps
+// pointing at the words the spot-check filing read; otherwise the one name of C1. The
+// sheet reads the words from whichever file book.json's texts entry names.
+function fullTextName(words, spotM) {
+  const spot13 = !!spotM && Array.isArray(spotM.texts) &&
+    spotM.texts.some(x => x && x.shot === FULL_TEXT.id && typeof x.file === 'string' && x.file);
+  return `${words} - ${FULL_TEXT.id} ${FULL_TEXT.name}${spot13 ? ' (whole book)' : ''}.txt`;
+}
 // This capture's files: every photo taken (never 01 or 12: they are locked and
 // never sent again), and the copyright page's words if typed. One file name per
 // shot number, whatever the template.
-function fullFiles(bk, shots, words) {
+function fullFiles(bk, shots, words, spotM) {
   const inT = {};
   fullShotList(bk.template).forEach(s => { inT[s.id] = s; });
   const out = [];
   for (const x of shots) {
     if (FULL_KEPT.indexOf(x.shotId) >= 0) continue;
     if (x.shotId === FULL_TEXT.id) {
-      if (x.text) out.push({ shot: FULL_TEXT.id, name: `${words} - ${FULL_TEXT.id} ${FULL_TEXT.name}.txt`, mime: 'text/plain',
+      if (x.text) out.push({ shot: FULL_TEXT.id, name: fullTextName(words, spotM), mime: 'text/plain',
         blob: new Blob([x.text], { type: 'text/plain' }), when: x.when, text: true });
       continue;
     }
@@ -2796,11 +2988,34 @@ function fullFiles(bk, shots, words) {
   }
   return out;
 }
+// The spot-check record in a chain of manifests: the first that is not a full capture.
+function spotOfChain(m) {
+  for (let p = m, n = 0; p && typeof p === 'object' && !Array.isArray(p) && n < 50; p = p.previous, n++) if (p.manifest !== 2) return p;
+  return null;
+}
+// An edit made on the checklist since this upload read the record.
+async function fullRevMoved(bk, rev0) {
+  const r = await dbGet('books', bk.id);
+  return !!r && (r.rev || 0) !== rev0;
+}
+// Is the request still asked for, just now? 'live' goes on; 'gone' stops with "Your
+// curator no longer asks for this book" and nothing more is written; no good answer
+// pauses the upload (her tap on Upload tries again), never trusting the list kept on
+// this phone.
+async function fullAskedOrStop(bk) {
+  const asked = await fullStillAsked(bk);
+  if (asked === 'live') return true;
+  if (asked === 'gone') { await dropCachedRequest(bk.requestId); throw new Error(FULL_WORDS.noLonger); }
+  await setUpload(bk, { state: 'paused', why: 'check' });
+  return false;
+}
 async function uploadFull(bk) {
   try {
-    // Once the request has left her list (filed or closed), nothing more goes up.
-    const live = ((await dbGet('kv', 'requests')) || {}).items || [];
-    if (!live.some(it => it && it.rid === bk.requestId)) throw new Error(FULL_WORDS.noLonger);
+    // The revision of her choices this run works from (fullStoreScreen).
+    const rev0 = bk.rev || 0;
+    // Once the request has left her list (filed or closed), nothing more goes up: asked
+    // of the request service before anything is written, and again before book.json.
+    if (!(await fullAskedOrStop(bk))) return;
     const shots = await shotsFor(bk.id);
     const t = fullTally(bk, shots);
     if (!t.ready) throw new Error(FULL_WORDS.progress(t.done, t.total));
@@ -2811,28 +3026,30 @@ async function uploadFull(bk) {
     const fid = chk.folder.id, cur = chk.book.m;
     let kids = await folderChildren(fid);
     // 1. The spot-check record, kept whole beside the new one: book.spot.json, written
-    //    only when absent and never replaced.
+    //    only when absent and never replaced. Steps 2 and 3 rest on it (what to keep,
+    //    and the words file's name), so the run never goes on without it: a read that
+    //    fails stops it here with nothing written, and a record that cannot be found
+    //    (in book.spot.json, or in book.json and its `previous`) refuses it.
     let spotM = null;
     const spotKid = kids.filter(k => k.name === SPOT_JSON);
     if (spotKid.length) {
-      try { spotM = JSON.parse(await driveText(DRIVE_FILES + encodeURIComponent(spotKid[0].id) + '?alt=media')); } catch (e) { spotM = null; }
+      let text;
+      try { text = await driveText(DRIVE_FILES + encodeURIComponent(spotKid[0].id) + '?alt=media'); }
+      catch (e) { if (/Drive error (403|404)/.test(String(e.message))) throw fullGone('book.spot.json read'); throw e; }
+      try { spotM = JSON.parse(text); } catch (e) { spotM = null; }
+      if (!spotM || typeof spotM !== 'object' || Array.isArray(spotM)) spotM = spotOfChain(cur);
     } else {
-      let text = null;
-      if (cur.manifest !== 2) { spotM = cur; text = chk.book.text; }
-      else {
-        for (let p = cur.previous, n = 0; p && typeof p === 'object' && n < 50; p = p.previous, n++) {
-          if (p.manifest !== 2) { spotM = p; text = JSON.stringify(p, null, 2); break; }
-        }
-      }
-      if (text != null) await createFile(fid, SPOT_JSON, 'application/json', new Blob([text], { type: 'application/json' }));
-      else console.warn('full capture: no spot-check record to keep for', bk.requestId);
+      spotM = spotOfChain(cur);
+      if (spotM) await createFile(fid, SPOT_JSON, 'application/json',
+        new Blob([spotM === cur ? chk.book.text : JSON.stringify(spotM, null, 2)], { type: 'application/json' }));
     }
+    if (!spotM) throw fullGone('no spot-check record');
     // 2. The files of an earlier capture that book.json still lists (one the
     //    curator refused as "Not this book") go into a sub-folder before anything
     //    new goes up: every file it lists that book.spot.json does not. Never 01 or
     //    12, never a file this capture sent. Done once per earlier capture.
     const asideKey = cur.manifest === 2 && cur.requestId !== bk.requestId ? `${cur.requestId || ''}|${cur.updated || ''}` : '';
-    if (asideKey && spotM && !(bk.aside && bk.aside.key === asideKey)) {
+    if (asideKey && !(bk.aside && bk.aside.key === asideKey)) {
       const keep = new Set(listedNames(spotM).concat(FULL_KEPT.map(id => chk.kept[id].file), ['book.json', SPOT_JSON]));
       const mine = new Set(Object.values(bk.fileIds || {}));
       const go = new Set(listedNames(cur).filter(n => !keep.has(n)));
@@ -2843,12 +3060,15 @@ async function uploadFull(bk) {
         for (const k of move) await driveMove(k.id, fid, sub);
       }
       bk.aside = { key: asideKey, rid: String(cur.requestId || ''), folderId: sub, moved: move.length, at: Date.now() };
-      await dbPut('books', bk);
+      await fullStoreUpload(bk);
       kids = await folderChildren(fid);
     }
     // 3. Only files not sent yet, or changed since they were sent: the photos two at
-    //    a time, then the copyright page's words, then book.json.
-    const files = fullFiles(bk, shots, chk.words);
+    //    a time, then the copyright page's words, then book.json. Never a file the
+    //    spot-check record lists (01, 12 and its words keep what the spot-check filed).
+    const files = fullFiles(bk, shots, chk.words, spotM);
+    const spotNames = new Set(listedNames(spotM));
+    if (files.some(f => spotNames.has(f.name))) throw fullGone('a name the spot-check record lists');
     const have = {};
     kids.forEach(k => { (have[k.name] = have[k.name] || []).push(k.id); });
     bk.sent = bk.sent || {};
@@ -2881,12 +3101,34 @@ async function uploadFull(bk) {
     if (!paused && !tokenFresh()) paused = true;
     if (paused) { await setUpload(bk, { state: 'paused' }); return; }
     // 4. book.json last, in place of the one it read, which `previous` keeps whole.
+    //    First: a change she made while the files went up sends this round again with
+    //    it (queued: the pump picks it up at once); and the request is asked about
+    //    again, so book.json is never written for a book the curator has filed since.
+    if (await fullRevMoved(bk, rev0)) { await setUpload(bk, { state: 'queued' }); return; }
+    if (!(await fullAskedOrStop(bk))) return;
     await writeFullManifest(fid, bk, files, chk);
     await setUpload(bk, { done: files.length + 1 });
-    bk.uploaded = Date.now();
+    // Sent, unless she changed something while book.json went up: then round again.
+    const at = Date.now();
+    let moved = false;
+    bk.manifestAt = at;
+    const rec = await dbPatch('books', bk.id, r => {
+      for (const k of FULL_UP_KEYS) { if (k in bk) r[k] = bk[k]; else delete r[k]; }
+      if ((r.rev || 0) !== rev0) { moved = true; r.upload = { ...bk.upload, state: 'queued' }; delete r.upload.why; return r; }
+      r.uploaded = at;
+      delete r.upload;
+      return r;
+    });
+    if (!rec) return;
+    if (moved) {
+      bk.upload = rec.upload;
+      if (curBook && curBook.id === bk.id) curBook.upload = rec.upload;
+      refreshUploadCards();
+      return;
+    }
+    bk.uploaded = at;
     delete bk.upload;
-    await dbPut('books', bk);
-    if (curBook && curBook.id === bk.id) curBook = bk;
+    if (curBook && curBook.id === bk.id) fullTakeUp(curBook, rec);
     await setAnswered(bk.requestId, { uploaded: bk.uploaded });
     toast(`Sent “${bk.title}” ✓`, 3600);
     renderReqCard();
