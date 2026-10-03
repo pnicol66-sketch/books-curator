@@ -16,7 +16,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261002-200903';
+const APP_VERSION = '20261003-012037';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -371,9 +371,45 @@ function show(id, { title = 'Books Curator', back = null, gear = false } = {}) {
   backAction = back;
   $('#btnBack').classList.toggle('hidden', !back);
   $('#btnSettings').classList.toggle('hidden', !gear);
+  if (place && id !== place.scr && PLACE_VIA.indexOf(id) < 0) place = null;
   window.scrollTo(0, 0);
 }
 $('#btnBack').onclick = () => backAction && backAction();
+
+/* ---------- coming back to the same line ---------- */
+// A list left for the camera, the "Can you read it?" check or a photo comes back at
+// the line that was used, at the same height on the screen, not at the top (owner,
+// 2 Oct 2026: "the app needs to stay at the input level it was last used at rather
+// than resetting back to the top after taking a photo for an input that is down the
+// list"). The place is marked only from the list itself and used once, by the list's
+// own way back (backToFull, backToBook, backToShelf); a list opened afresh starts at
+// the top. `sel` finds the line again after the list is drawn anew.
+const PLACE_VIA = ['scr-camera', 'scr-gate', 'scr-viewer'];
+let place = null;   // { scr, key, sel, top, y }
+function markPlace(scr, key, sel) {
+  if (!$('#' + scr).classList.contains('active')) return;
+  const el = sel ? document.querySelector(sel) : null;
+  place = { scr, key, sel, top: el ? el.getBoundingClientRect().top : null, y: window.scrollY };
+}
+// Straight after show(): the list as it was left, at once (no flash of the top).
+function takePlace(scr, key) {
+  const p = place;
+  place = null;
+  if (!p || p.scr !== scr || p.key !== key) return null;
+  window.scrollTo(0, p.y);
+  return p;
+}
+// Once the list is drawn again: the line used, at the same height on the screen, kept
+// between the header and the bottom edge should the screen have grown shorter meanwhile
+// (the phone turned sideways for the shot, or the browser's bar back).
+function settlePlace(p) {
+  if (!p || !$('#' + p.scr).classList.contains('active')) return;
+  const el = p.sel ? document.querySelector(p.sel) : null;
+  if (!el || p.top == null) return;
+  const r = el.getBoundingClientRect(), hdr = $('header').getBoundingClientRect().bottom, vh = window.innerHeight;
+  const want = Math.max(hdr + 8, Math.min(p.top, vh - Math.min(r.height, vh - hdr - 16) - 8));
+  window.scrollBy(0, r.top - want);
+}
 $('#btnSettings').onclick = () => openSettings();
 
 /* ---------- home ---------- */
@@ -486,7 +522,8 @@ function backToShelf() {
   freeGate();
   stopVoice();
   show('scr-shelf', { title: 'Shelf', back: goHome });
-  renderShelf();
+  const p = takePlace('scr-shelf', curShelf && curShelf.id);
+  return renderShelf().then(() => settlePlace(p));
 }
 async function renderShelf() {
   thumbUrls.forEach(u => URL.revokeObjectURL(u));
@@ -503,6 +540,7 @@ async function renderShelf() {
   for (const p of photos) {
     const b = document.createElement('button');
     b.className = 'frame';
+    b.dataset.n = p.n;
     const url = URL.createObjectURL(p.blob);
     thumbUrls.push(url);
     b.innerHTML = `<img alt="Frame ${p.n}" src="${url}"><span class="n">${p.n}</span>`;
@@ -568,6 +606,7 @@ function capBack() {
   return capT.kind === 'book' ? openBookCamera(capT.shot) : capT.kind === 'full' ? openFullCamera(capT.shot) : openCamera(curFrame);
 }
 async function openCamera(frameNo) {
+  if (curShelf) markPlace('scr-shelf', curShelf.id, frameNo ? `#frameGrid .frame[data-n="${frameNo}"]` : '#btnShoot');
   capT = { kind: 'shelf' };
   curFrame = frameNo || null;
   freeGate();
@@ -588,6 +627,7 @@ async function openBookCamera(shotId) {
   const s = BOOK_SHOTS.find(x => x.id === shotId);
   if (!curBook || !s) return goHome();
   if (curBook.upload && curBook.upload.state === 'uploading') return toast('Wait for the upload to finish');
+  markPlace('scr-book', curBook.id, `#scr-book .bkshot[data-shot="${shotId}"]`);
   if ($('#scr-book').classList.contains('active')) await leaveBook();
   // Capture minutes time the shooting: the clock starts when the camera opens on a
   // book with no photo yet, not when the request was first opened (a request read
@@ -943,6 +983,7 @@ function openViewer(p) {
     $('#viewerName').textContent = `${curBook.title} · ${p.shotId} ${name} · ${p.w}×${p.h}`;
     $('#btnVRetake').textContent = 'Re-shoot this photo';
     $('#btnVDelete').textContent = 'Delete this photo';
+    markPlace('scr-full', curBook.id, `#scr-full .bkshot[data-shot="${p.shotId}"]`);
     show('scr-viewer', { title: `${p.shotId} ${name}`, back: backToFull });
     return;
   }
@@ -951,12 +992,14 @@ function openViewer(p) {
     $('#viewerName').textContent = `${curBook.title} · ${p.shotId} ${s.name} · ${p.w}×${p.h}`;
     $('#btnVRetake').textContent = 'Re-shoot this photo';
     $('#btnVDelete').textContent = 'Delete this photo';
+    markPlace('scr-book', curBook.id, `#scr-book .bkshot[data-shot="${p.shotId}"]`);
     show('scr-viewer', { title: `${p.shotId} ${s.name}`, back: backToBook });
     return;
   }
   $('#viewerName').textContent = `${curShelf.label} · frame ${p.n} · ${p.w}×${p.h}`;
   $('#btnVRetake').textContent = 'Re-shoot this frame';
   $('#btnVDelete').textContent = 'Delete this frame';
+  markPlace('scr-shelf', curShelf.id, `#frameGrid .frame[data-n="${p.n}"]`);
   show('scr-viewer', { title: `Frame ${p.n}`, back: backToShelf });
 }
 $('#btnVRetake').onclick = () => {
@@ -2125,7 +2168,8 @@ function backToBook() {
   stopVoice();
   if (!curBook) return openRequests();
   show('scr-book', { title: 'Book', back: async () => { await leaveBook(); openRequest(curBook.requestId); } });
-  renderBook();
+  const p = takePlace('scr-book', curBook.id);
+  return renderBook().then(() => settlePlace(p));
 }
 async function renderBook() {
   const bk = curBook;
@@ -2599,7 +2643,8 @@ function backToFull() {
   stopVoice();
   if (!curBook || !curBook.full) return openRequests();
   show('scr-full', { title: 'Book', back: async () => { await leaveFull(); openRequest(curBook.requestId); } });
-  renderFull();
+  const p = takePlace('scr-full', curBook.id);
+  return renderFull().then(() => settlePlace(p));
 }
 // The note, the copyright words and any typed "Other" reason are read off the
 // screen when it is left (dictation fills the boxes without a change event).
@@ -2860,6 +2905,7 @@ async function openFullCamera(shotId) {
   const s = bk && bk.full ? fullShotDef(bk.template, shotId) : null;
   if (!s || s.kept) return bk && bk.full ? backToFull() : goHome();
   if (!fullEditable(bk)) return toast('Wait for the upload to finish');
+  markPlace('scr-full', bk.id, `#scr-full .bkshot[data-shot="${shotId}"]`);
   if ($('#scr-full').classList.contains('active')) await leaveFull();
   // Capture minutes time the shooting: the clock starts when the camera first opens
   // on this book with no photo yet.
