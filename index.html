@@ -39,7 +39,7 @@ header h1 { font-size: 17px; font-weight: 650; margin: 0; flex: 1; text-align: c
 .iconbtn:active { background: var(--card2); }
 main > section { display: none; }
 main > section.active { display: block; padding: 16px; max-width: 640px; margin: 0 auto; padding-bottom: 48px; }
-#scr-camera.active, #scr-gate.active {
+#scr-camera.active, #scr-gate.active, #scr-review.active {
   display: flex; flex-direction: column; padding: 0; max-width: none;
   height: calc(100vh - var(--hdr)); height: calc(100dvh - var(--hdr));
 }
@@ -194,8 +194,13 @@ h2.sect { font-size: 13px; color: var(--dim); text-transform: uppercase; letter-
   padding: 10px 16px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,.5);
   font-size: 15px; font-weight: 700; color: var(--text); text-align: center; line-height: 1.25;
 }
+/* a photo from the crop screen: the question in a row under the photo, never over it */
+#gatePrompt.row {
+  position: static; transform: none; max-width: none; border: 0; border-top: 2px solid var(--accent); border-radius: 0;
+  box-shadow: none; padding: 8px 12px; background: rgba(10,10,12,.92); font-size: 14px; font-weight: 600; text-align: left; line-height: 1.3;
+}
 #gateBar {
-  display: flex; gap: 8px; padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
   background: var(--bg); border-top: 1px solid var(--line);
 }
 #gateBar button {
@@ -203,6 +208,47 @@ h2.sect { font-size: 13px; color: var(--dim); text-transform: uppercase; letter-
   background: var(--card); color: var(--text); font-size: 15px; font-weight: 600; white-space: nowrap;
 }
 #gateBar #btnKeep { background: var(--accent); color: #191204; border-color: var(--accent); flex: 1.3; }
+#gateBar #btnFixCrop { flex: 1 1 100%; order: -1; }
+/* crop screen (the vinyl app's review screen; dark only, the app's own gold) */
+#reviewWrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; position: relative; }
+#reviewCanvas { display: block; touch-action: none; }
+#tapPrompt {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: rgba(10,10,12,.92); border-top: 2px solid var(--accent);
+}
+#tapPrompt.tapping { animation: tapPulse 1.7s ease-in-out infinite; }
+#tapPrompt.bad { border-top-color: #ff6b5b; }
+#tapPrompt.bad #tapMsg { color: #ffa093; }
+@keyframes tapPulse {
+  0%, 100% { box-shadow: inset 0 0 0 0 rgba(217,164,65,0); }
+  50%      { box-shadow: inset 0 0 0 3px rgba(217,164,65,.28); }
+}
+@media (prefers-reduced-motion: reduce) { #tapPrompt.tapping { animation: none; } }
+#tapPips { display: inline-flex; gap: 6px; flex: none; }
+#tapPips i { width: 13px; height: 13px; border-radius: 50%; display: inline-block; box-sizing: border-box; border: 2px solid var(--dim); }
+#tapPips i.on { background: var(--accent); border-color: var(--accent); }
+#tapMsg { font-size: 13.5px; font-weight: 600; color: var(--text); line-height: 1.3; }
+#reviewBar {
+  display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  background: var(--bg); border-top: 1px solid var(--line);
+}
+#reviewBar button {
+  flex: 1 1 28%; min-width: 0; padding: 12px 4px; border-radius: 11px; border: 1px solid var(--line);
+  background: var(--card); color: var(--text); font-size: 14px; font-weight: 600; white-space: nowrap;
+}
+#reviewBar button:disabled { opacity: .5; }
+#reviewBar #btnRetake { flex-basis: 38%; }
+#reviewBar #btnSave { background: var(--accent); color: #191204; border-color: var(--accent); flex-basis: 52%; }
+/* the one-time note (crop training copies) */
+.modal {
+  position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(0,0,0,.65);
+}
+.modalbox { background: var(--card); border: 1px solid var(--accent); border-radius: 14px; padding: 16px; max-width: 440px; width: 100%; }
+.modalbox p { margin: 0 0 14px; font-size: 15px; line-height: 1.45; }
+.checkrow { display: flex; gap: 10px; align-items: flex-start; margin-top: 4px; font-size: 15px; }
+.checkrow input { margin-top: 3px; width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.ct-sum { font-weight: 700; font-size: 14px; margin: 12px 0; }
 /* viewer */
 #viewerImg { width: 100%; border-radius: 12px; background: #000; }
 #viewerName { color: var(--dim); font-size: 13px; word-break: break-all; margin: 10px 0 16px; }
@@ -211,6 +257,7 @@ details { background: var(--card); border: 1px solid var(--line); border-radius:
 details summary { font-weight: 600; font-size: 14.5px; }
 details ol { padding-left: 20px; color: var(--dim); font-size: 13.5px; line-height: 1.55; }
 details a { color: var(--accent); }
+#cropSettings a, #photoSizeHint a { color: var(--accent); }
 .lbl-opt { color: var(--dim); font-weight: 400; }
 p.hint { color: var(--dim); font-size: 12.5px; line-height: 1.45; margin: 8px 0 0; }
 .linkrow { display: flex; gap: 8px; }
@@ -342,6 +389,7 @@ hr.fl-line { border: 0; border-top: 1px solid var(--line); margin: 26px 0 0; }
     <button id="btnUploadSignin" class="secondary hidden">Sign in to continue uploads</button>
     <button id="btnArchive" class="secondary hidden">📁 Uploaded shelves</button>
     <button id="btnInstall" class="secondary hidden">Install app on this phone</button>
+    <button id="btnCropTest" class="secondary hidden">Crop test (nothing is sent)</button>
   </div>
 </section>
 
@@ -417,19 +465,44 @@ hr.fl-line { border: 0; border-top: 1px solid var(--line); margin: 26px 0 0; }
   </div>
 </section>
 
+<section id="scr-review">
+  <div id="reviewWrap"><canvas id="reviewCanvas"></canvas></div>
+  <div id="tapPrompt" class="hidden"><span id="tapPips"></span><span id="tapMsg"></span></div>
+  <div id="reviewBar">
+    <button id="btnUndo">Undo</button>
+    <button id="btnFull">Whole photo</button>
+    <button id="btnRotate">Rotate</button>
+    <button id="btnRetake">Retake</button>
+    <button id="btnSave">Save</button>
+  </div>
+</section>
+
 <section id="scr-gate">
   <div id="gateWrap"><canvas id="gateCanvas"></canvas>
     <div id="gatePrompt">Drag the loupe over the smallest spine. Can you read it?</div>
   </div>
   <div id="gateBar">
+    <button id="btnFixCrop" class="hidden">Fix the crop</button>
     <button id="btnReshoot">✗ No — re-shoot</button>
     <button id="btnKeep">✓ Yes — keep</button>
+  </div>
+</section>
+
+<section id="scr-croptest">
+  <p id="ctIntro" class="hint"></p>
+  <div class="stack" style="margin-top:12px">
+    <button id="btnCtShoot" class="primary">Take the next photo</button>
+  </div>
+  <div id="ctList"></div>
+  <div class="stack" style="margin-top:12px">
+    <button id="btnCtDone" class="secondary">Finish the test</button>
   </div>
 </section>
 
 <section id="scr-viewer">
   <img id="viewerImg" alt="Shelf photo">
   <div id="viewerName"></div>
+  <p id="viewerCropNote" class="hint hidden" style="margin:0 0 14px"></p>
   <div class="stack">
     <button id="btnVRetake" class="secondary">Re-shoot this frame</button>
     <button id="btnVDelete" class="secondary danger">Delete this frame</button>
@@ -566,8 +639,16 @@ hr.fl-line { border: 0; border-top: 1px solid var(--line); margin: 26px 0 0; }
     <p id="reqTestNote" class="hint"></p>
   </details>
 
+  <div id="cropSettings" class="hidden">
+    <h2 id="cropHead" class="sect"></h2>
+    <label class="checkrow"><input type="checkbox" id="inLogCrops"><span id="cropLogLabel" style="font-weight:700"></span></label>
+    <p id="cropLogHelp" class="hint"></p>
+    <p id="cropPrivacy" class="hint"></p>
+    <p id="cropStat" class="hint"></p>
+  </div>
+
   <h2 class="sect">Photo output</h2>
-  <p class="hint" style="margin:0 0 8px">Photos are saved at the largest size the camera gives, so the smallest print on a spine can be read. Leave this at <b>Highest</b>.</p>
+  <p class="hint" style="margin:0 0 8px"><span id="photoSizeHint">Photos are saved at the largest size the camera gives, so the smallest print on a spine can be read.</span> Leave this at <b>Highest</b>.</p>
   <label class="field" for="inQuality">Photo quality</label>
   <select id="inQuality">
     <option value="0.92">High</option>
@@ -590,7 +671,14 @@ hr.fl-line { border: 0; border-top: 1px solid var(--line); margin: 26px 0 0; }
   <span>A new version is ready.</span>
   <button id="btnUpdate">Update</button>
 </div>
+<div id="cropNote" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="cropNoteText">
+  <div class="modalbox">
+    <p id="cropNoteText"></p>
+    <div class="row2"><button id="btnCropNoteOff" class="secondary"></button><button id="btnCropNoteOk" class="primary"></button></div>
+  </div>
+</div>
 <div id="toast"></div>
+<script src="detect.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

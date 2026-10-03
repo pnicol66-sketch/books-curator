@@ -5,8 +5,9 @@
  * A separate project from Vinyl Curator; the machinery that is proven there
  * (IndexedDB store, camera, background Drive upload queue, folder sharing,
  * update bar, dictation) is copied in with the same function names so a diff
- * between the two apps stays readable. The vinyl domain (crop, matrix
- * dictation) is not here. Shelves: one labelled photo (or a few overlapping
+ * between the two apps stays readable. The vinyl crop screen is copied in for
+ * book photos (switched off by CROP_ON until it ships); shelf frames are never
+ * cropped, and matrix dictation is not here. Shelves: one labelled photo (or a few overlapping
  * frames) per shelf, checked for legibility, uploaded to the client's own Drive
  * under Books Curator/_Shelves/<label>/. Request answers: the curator asks for
  * one book off a shelf; the phone takes its jacket front and copyright page and
@@ -16,7 +17,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261003-012037';
+const APP_VERSION = '20261003-220522';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -130,13 +131,13 @@ const FULL_WORDS = {
     P: 'Poor: badly torn, with large pieces missing, or in pieces.',
   },
 };
-// C7: the grade buttons, and the chips in the sheet's own list words.
+// The grade buttons, and the chips in the sheet's own list words.
 const FULL_GRADES = ['F', 'NF', 'VG+', 'VG', 'G', 'FR', 'P'];
 const FULL_FLAGS = {
   jacket: ['Price-clipped', 'Facsimile', 'Mylar (removed to shoot)'],
   book: ['Ex-library', 'Remainder mark', 'Previous-owner inscription', 'Bookplate'],
 };
-// C1: one file name per shot number, whatever the template. 01 and 12 keep their
+// One file name per shot number, whatever the template. 01 and 12 keep their
 // spot-check file names; 13 is the copyright page's words (.txt).
 const FULL_NAMES = {
   '03': 'Back', '05': 'Spine', '06': 'Front Flap', '07': 'Corner', '08': 'Rear Flap', '09': 'Front Board',
@@ -247,6 +248,103 @@ function fullShotDef(t, id) {
 // The new required photos a template asks for (the "Whole book - N photos" count).
 function fullRequiredCount(t) { return fullShotList(t).filter(s => s.req).length; }
 
+/* ---------- the crop step: book photos ----------
+ * A book photo goes through a crop screen (openReview, copied from the vinyl app with its
+ * names) between the camera and the "Can you read it?" check. She taps the corners, the app
+ * straightens the photo to them, and the cropped photo is the one kept and sent. Jackets,
+ * boards and spines take four points; pages and flaps six (the four corners, and two round
+ * dots where the page starts to curve into the middle of the book). Shelf frames and the
+ * shots with no crop kind go to the check exactly as before; so do 01 and 12 once they are
+ * sent (they are never shot again).
+ *
+ * Each kept crop also banks one training example: the uncropped frame at 1280 px or less and
+ * the points she set, with no name, title or id in its small file. The phone writes these ONLY
+ * into the drop folder `_Crop examples` inside her upload folder (found by id; the one place
+ * this app's Google permission lets it write), after that book has uploaded. The curator's
+ * sheet copies every example from there into the central crop training library, which is the
+ * only place training reads. Nothing is learned on the phone.
+ *
+ * The whole step is switched off (CROP_ON false) until it ships together with the privacy
+ * page's words; while it is off the app behaves as it did before it: no crop screen, no
+ * example kept, no Settings section, nothing uploaded. The one exception is the session-only
+ * crop test opened by ?crop=1 (a throwaway book that nothing uploads, deleted after).
+ * Every word the crop step shows is in CROP_WORDS. */
+let CROP_ON = false;                 // the switch; false until it ships (a test may turn it on in the page)
+const SPOT_CROP_ON = true;           // 01 and 12 crop at a new spot-check; only a rollback lever
+// The crop kind per shot number, the same in both templates: 4 points or 6; any other shot
+// and every shelf frame: none. 01 and 12 apply only at a spot-check.
+const CROP_POINTS = { '01': 4, '03': 4, '05': 4, '09': 4, '10': 4, '20': 4, '06': 6, '08': 6, '11': 6, '12': 6, '14': 6, '27': 6 };
+const CROP_FOLDER = '_Crop examples';   // the drop folder, directly inside her upload folder (never under _Shelves)
+const CROP_CAP = 150;                   // examples waiting on the phone; at the cap no more are kept (never dropped)
+// A phone's canvas limit (iOS: 16,777,216 pixels a canvas). A larger source is scaled to it before
+// the crop, and a straightened photo that would come out larger (an outline near the photo's edges,
+// with its margin) is made smaller to fit. A `let` so a test may lower it in the page.
+let CROP_MAX_PX = 16777216;
+const CROP_MARGIN = 0.02;               // the safety margin beyond the outline, as a share of the output
+const CROP_SMALL = 1280;                // the training copy's longest side
+const CROP_WORDS = {
+  // What she outlines, by shot number (03 by template).
+  what: {
+    '01': 'front of the jacket (or the cover)', '03': { hc: 'back of the jacket', pb: 'back cover' }, '05': 'spine',
+    '09': 'front board', '10': 'spine', '20': 'back board', '06': 'flap', '08': 'flap',
+    '11': 'page', '12': 'page', '14': 'page', '27': 'page',
+  },
+  tap: what => `Tap the 4 corners of the ${what}, in any order.`,
+  missing: 'If a corner is missing, tap where it would be.',
+  dots: {
+    page: 'If the page curves down into the middle of the book, drag a round dot to where the curve starts; the other dot follows. If it lies flat, leave them. Then Save.',
+    flap: 'If the flap curves where it folds, drag a round dot to where the flap starts to lift; the other dot follows. If it lies flat, leave them. Then Save.',
+  },
+  adjust4: 'Drag any corner or edge to fix it, then Save.',
+  adjust6: 'Drag any corner, edge or dot to fix it, then Save.',
+  invalid: {
+    cross: what => `The outline crosses itself. Drag the corners so it goes round the ${what}.`,
+    close6: 'Two points are too close. Drag them apart.',   // a dot and a corner, or two corners
+    close4: 'Two corners are too close. Drag them apart.',
+    heights: what => `The dashed line is much shorter or longer than the sides. Drag the round dots back to the edges of the ${what}.`,
+    outside: 'A point is outside the photo. Drag it back inside.',
+  },
+  straightening: 'Straightening…',
+  saveFailed: 'This photo could not be straightened. Try Start again, or Whole photo.',
+  keepFailed: 'This photo could not be saved on this phone. Try Keep again, or take it again.',
+  buttons: { undo: 'Undo', again: 'Start again', whole: 'Whole photo', rotate: 'Rotate', retake: 'Retake', save: 'Save', fix: 'Fix the crop' },
+  top: 'top',   // the tab on the edge that will be the top
+  // The "Can you read it?" check of a photo from the crop screen.
+  gate12: 'Drag the loupe along the foot of the page. Can you read the number line, if there is one?',
+  gatePage: 'Is the whole page there, down to the last line?',
+  viewer: 'To change the edges, take it again.',
+  // Settings, under the heading "Book photos", and the line under Photo output.
+  settingsHead: 'Book photos',
+  logLabel: 'Help improve the cropping',
+  // What is kept, said the same way here, in the note and on the privacy page: a copy of every
+  // photo kept from the crop screen (cropped, or kept whole with Whole photo), and its small file.
+  logHelp: 'For every book photo you keep from the crop screen, cropped or kept whole with Whole photo, a smaller copy as you took it goes to the folder _Crop examples in your upload folder after that book has uploaded, and Books Curator copies it from there into its own training folder. The copy shows the book as you photographed it, including its title and anything written in it. With it goes a small file of the edges you set, which photograph it was, which way up it goes, a code that groups one book\'s photos without naming it, the app\'s version and the date and time. Nothing else is added: no names, titles or notes. Books Curator uses them only to improve the cropping. A cropped photo keeps a thin margin beyond the edges you set (on a page or flap, at its top and bottom). Turning this off and tapping Save settings deletes from the phone any copies not yet sent.',
+  stat: (kept, sent, waiting) => `Crop examples: ${kept} kept · ${sent} sent · ${waiting} waiting for your next upload.`,
+  statFull: 'No more are kept until these have been sent.',
+  sizeHint: "Book photos are cropped to the edges you set, with a thin margin beyond them (on a page or flap, at its top and bottom), and keep the camera's detail up to about 16 megapixels. While Help improve the cropping is on, a smaller copy as you took it is also kept (see the privacy page). Shelf photos are saved whole.",
+  // The words in sizeHint and privacyMore made a link to the privacy page's part on cropping.
+  privacyLink: 'the privacy page',
+  privacyHref: 'privacy.html#cropping',
+  privacyMore: 'More about these copies, and how to have them deleted, is on the privacy page.',
+  // The note shown once, at the first photo kept from the crop screen (before anything is sent).
+  // That photo may be cropped or kept whole, so the note says what happens to both.
+  note: 'A smaller copy of each book photo you keep from the crop screen, cropped or whole, goes to the folder _Crop examples in your Drive folder after its book uploads, and Books Curator copies it from there into its own training folder to improve the cropping. It shows the book as you photographed it. With it goes a small file of the edges you set, which photograph it was, which way up it goes, a code that groups one book\'s photos without naming it, the app\'s version and the date and time. A cropped photo keeps a thin margin beyond the edges you set (on a page or flap, at its top and bottom). You can turn this off now, or later in Settings, under Book photos.',
+  noteOk: 'OK',
+  noteOff: 'Turn it off',
+  // The crop test (?crop=1, for the curator; nothing is sent).
+  trial: {
+    open: 'Crop test (nothing is sent)',
+    title: 'Crop test',
+    intro: 'Nothing is sent. Each photo is timed, then deleted from this phone.',
+    shoot: 'Take the next photo',
+    done: 'Finish the test',
+    row: r => `${r.n}. ${r.shot} (${r.whole ? 'whole photo' : r.kind + ' points'}): photo ${r.src.w}×${r.src.h}` +
+      (r.cap ? ` (scaled to ${r.cap.w}×${r.cap.h})` : '') + `, kept ${r.w}×${r.h}. Save ${r.saveMs} ms, Keep ${r.keepMs} ms`,
+    fail: r => `${r.n}. ${r.shot}: failed at ${r.at} (${r.msg})`,
+    sum: s => `${s.n} photos, ${s.fails} failed. Save: slowest ${s.maxSave} ms, average ${s.avgSave} ms. Keep: slowest ${s.maxKeep} ms.`,
+  },
+};
+
 /* ---------- IndexedDB ---------- */
 let _db = null;
 function openDB() {
@@ -352,6 +450,9 @@ const settings = {
   operator: '', quality: 0.95,
   driveFolder: 'Books Curator', driveFolderId: '',
   requestsUrl: '',
+  // "Help improve the cropping": on by default (an older phone's stored settings lack it,
+  // and loadSettings keeps this default). Read only while the crop step is on.
+  logCrops: true,
 };
 // What the app should actually use: an explicit Settings entry always wins.
 function cred(k) { return String(settings[k] || BUILTIN[k] || '').trim(); }
@@ -374,7 +475,8 @@ function show(id, { title = 'Books Curator', back = null, gear = false } = {}) {
   if (place && id !== place.scr && PLACE_VIA.indexOf(id) < 0) place = null;
   window.scrollTo(0, 0);
 }
-$('#btnBack').onclick = () => backAction && backAction();
+// While the crop screen is straightening (Save, Whole photo) the header Back waits, as its buttons do.
+$('#btnBack').onclick = () => { if (review.busy) return; if (backAction) backAction(); };
 
 /* ---------- coming back to the same line ---------- */
 // A list left for the camera, the "Can you read it?" check or a photo comes back at
@@ -384,7 +486,7 @@ $('#btnBack').onclick = () => backAction && backAction();
 // list"). The place is marked only from the list itself and used once, by the list's
 // own way back (backToFull, backToBook, backToShelf); a list opened afresh starts at
 // the top. `sel` finds the line again after the list is drawn anew.
-const PLACE_VIA = ['scr-camera', 'scr-gate', 'scr-viewer'];
+const PLACE_VIA = ['scr-camera', 'scr-gate', 'scr-viewer', 'scr-review'];
 let place = null;   // { scr, key, sel, top, y }
 function markPlace(scr, key, sel) {
   if (!$('#' + scr).classList.contains('active')) return;
@@ -424,7 +526,10 @@ async function goHome() {
   stopCam();
   stopLevel();
   freeGate();
+  freeReview();
   show('scr-home', { title: 'Books Curator', gear: true });
+  $('#btnCropTest').textContent = CROP_WORDS.trial.open;
+  $('#btnCropTest').classList.toggle('hidden', !CROP_TRIAL);
   const all = (await dbAll('shelves')).sort((a, b) => b.created - a.created);
   const shelves = all.filter(s => !s.uploaded);
   const hiddenCount = all.length - shelves.length;
@@ -520,6 +625,7 @@ function backToShelf() {
   stopCam();
   stopLevel();
   freeGate();
+  freeReview();
   stopVoice();
   show('scr-shelf', { title: 'Shelf', back: goHome });
   const p = takePlace('scr-shelf', curShelf && curShelf.id);
@@ -603,13 +709,15 @@ let torchOn = false, torchWant = false;
 // (curShelf, curFrame) or a book shot (curBook, capT.shot).
 let capT = { kind: 'shelf' };
 function capBack() {
-  return capT.kind === 'book' ? openBookCamera(capT.shot) : capT.kind === 'full' ? openFullCamera(capT.shot) : openCamera(curFrame);
+  return capT.kind === 'book' ? openBookCamera(capT.shot) : capT.kind === 'full' ? openFullCamera(capT.shot)
+    : capT.kind === 'trial' ? openTrialCamera() : openCamera(curFrame);
 }
 async function openCamera(frameNo) {
   if (curShelf) markPlace('scr-shelf', curShelf.id, frameNo ? `#frameGrid .frame[data-n="${frameNo}"]` : '#btnShoot');
   capT = { kind: 'shelf' };
   curFrame = frameNo || null;
   freeGate();
+  freeReview();
   const photos = await photosFor(curShelf.id);
   const n = curFrame || photos.length + 1;
   show('scr-camera', { title: curShelf.label, back: backToShelf });
@@ -635,6 +743,7 @@ async function openBookCamera(shotId) {
   if (!(await shotsFor(curBook.id)).some(x => x.blob)) { curBook.startedAt = Date.now(); await dbPut('books', curBook); }
   capT = { kind: 'book', shot: shotId };
   freeGate();
+  freeReview();
   stopLevel();
   show('scr-camera', { title: curBook.title || 'Book', back: backToBook });
   $('#camLabel').textContent = `${s.id} ${s.name}`;
@@ -722,7 +831,7 @@ $('#fileInput').onchange = async e => {
   if (!f) return;
   try {
     const bmp = await createImageBitmap(f, { imageOrientation: 'from-image' });
-    openGate(bmp);
+    await openReview(bmp);
   } catch {
     toast('Could not read that image');
   }
@@ -774,7 +883,1281 @@ async function snap() {
       return toast('Camera returned a blank frame — hold steady and snap again', 3000);
     }
   }
-  openGate(bmp);
+  openReview(bmp);
+}
+
+/* ---------- review / crop ----------
+ * Copied from the vinyl app's review screen, names kept: its quad path only (no ellipse,
+ * circle or run-out, no settle timer, no Auto, no auto-level). She taps the 4 corners in any
+ * order with the loupe; Undo takes the last tap back. Then she can drag a corner (the loupe
+ * follows it), an edge's pill, the inside (everything moves), and on a page or flap a round
+ * dot or the dashed line between the dots. A held dot moves freely and the other slides onto
+ * the line from the vanishing point of the page's sides through it (Detect.dotsToVp), so the
+ * outline she sees is the one Save straightens and Save moves no point. The four corners
+ * move only under her finger. An outline that crosses itself is drawn red and Save refuses.
+ * The original photo is held until Keep, Re-shoot or leaving the crop or check screen. */
+function freshReview() {
+  return {
+    bmp: null, kind: 0, shot: '', template: '', quad: null, dots: null, mid: null, mode: 'adjust', taps: [], tapActive: null,
+    rot: 0, scale: 1, dpr: 1, dragging: null, loupe: null, pending: null, src: null, cap: null, busy: false, saveMs: 0,
+  };
+}
+let review = freshReview();
+function freeReview() {
+  if (review.bmp && review.bmp.close) review.bmp.close();
+  review = freshReview();
+  const c = $('#reviewCanvas');
+  if (c && c.width) { c.width = 0; c.height = 0; }   // the screen copy is drawn again on the next open
+}
+// The crop kind of the shot the camera is on: 4, 6 or 0 (no crop screen).
+function cropKindFor(kind, shot) {
+  if (kind === 'trial') return CROP_POINTS[shot] || 0;
+  if (!CROP_ON || kind === 'shelf') return 0;
+  const k = CROP_POINTS[shot] || 0;
+  // 01 and 12: only at a new spot-check (the ones filed are never shot again).
+  if (FULL_KEPT.indexOf(shot) >= 0) return kind === 'book' && SPOT_CROP_ON ? k : 0;
+  return kind === 'full' ? k : 0;
+}
+function cropKind() { return capT ? cropKindFor(capT.kind, capT.shot) : 0; }
+function capTemplate() {
+  return capT.kind === 'book' ? 'spot' : capT.kind === 'full' && curBook ? curBook.template : 'hc';
+}
+function capShotDef() {
+  return capT.kind === 'book' ? BOOK_SHOTS.find(x => x.id === capT.shot)
+    : capT.kind === 'full' && curBook ? fullShotDef(curBook.template, capT.shot)
+    : capT.kind === 'trial' ? fullShotDef('hc', capT.shot) || BOOK_SHOTS.find(x => x.id === capT.shot) : null;
+}
+function shotName(id) { return FULL_NAMES[id] || (BOOK_SHOTS.find(x => x.id === id) || {}).name || ''; }
+function reviewTitle() { return `${review.shot} ${shotName(review.shot)}`; }
+// What she outlines, in words (03 by template).
+function cropWhat(shot = review.shot, t = review.template) {
+  const w = CROP_WORDS.what[shot];
+  return w && typeof w === 'object' ? (w[t] || w.hc) : (w || 'page');
+}
+// A source above CROP_MAX_PX (a 48-50 MP sensor) is scaled down before the crop; her
+// photos never are. The original is closed once the smaller copy exists.
+async function capPixels(bmp) {
+  const px = bmp.width * bmp.height;
+  if (px <= CROP_MAX_PX) return bmp;
+  const k = Math.sqrt(CROP_MAX_PX / px);
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.floor(bmp.width * k));
+  c.height = Math.max(1, Math.floor(bmp.height * k));
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(bmp, 0, 0, c.width, c.height);
+  const out = await createImageBitmap(c);
+  c.width = 0; c.height = 0;
+  if (bmp.close) bmp.close();
+  return out;
+}
+// The way in from the camera and the gallery: a shelf frame, or a shot with no crop kind,
+// goes on to the check at once (the same screen and the same file as before); a four- or
+// six-point shot opens the crop screen.
+async function openReview(bmp) {
+  const k = cropKind();
+  if (!k) return openGate(bmp);
+  stopCam();
+  stopLevel();
+  freeGate();
+  freeReview();
+  const src = { w: bmp.width, h: bmp.height };
+  try { bmp = await capPixels(bmp); }
+  catch (e) { console.error('crop: scale', e); return openGate(bmp); }
+  review = Object.assign(freshReview(), { bmp, kind: k, shot: capT.shot, template: capTemplate(), src,
+    cap: bmp.width !== src.w || bmp.height !== src.h ? { w: bmp.width, h: bmp.height } : null });
+  const B = CROP_WORDS.buttons;
+  $('#btnFull').textContent = B.whole;
+  $('#btnRotate').textContent = B.rotate;
+  $('#btnRetake').textContent = B.retake;
+  $('#btnSave').textContent = B.save;
+  show('scr-review', { title: reviewTitle(), back: capBack });
+  // The prompt row is shown and filled first, then the photo is fitted to the space left.
+  enterTapMode();
+  layoutReview();
+}
+// Back from the check to the crop screen, with her points as she left them (Fix the crop,
+// and the check's own Back for a photo from the crop screen).
+function backToReview() {
+  if (!review.bmp) return capBack();
+  freeGate();
+  show('scr-review', { title: reviewTitle(), back: capBack });
+  updateTapPrompt();
+  layoutReview();
+}
+function enterTapMode() {
+  review.mode = 'tap';
+  review.taps = [];
+  review.quad = null;
+  review.dots = null;
+  review.mid = null;
+  review.tapActive = null;
+  review.dragging = null;
+  review.loupe = null;
+  updateTapPrompt();
+  drawReview();
+}
+// taps needed to seed: the 4 corners (a page's two dots are placed, not tapped)
+function tapsNeeded() { return 4; }
+/* order four tapped points into TL,TR,BR,BL regardless of tap order: the head rule (the
+   shorter pair of sides is head and foot, the head nearer the top of the screen), the same
+   for four and six points */
+function orderQuad(pts) { return Detect.orderQuad(pts); }
+// Every point in role order: four [TL, TR, BR, BL], six [TL, TM, TR, BR, BM, BL].
+function cropPoints() {
+  const q = review.quad;
+  if (!q) return null;
+  if (review.kind !== 6 || !review.dots) return q.map(p => ({ x: p.x, y: p.y }));
+  const d = review.dots;
+  return [q[0], d[0], q[1], q[2], d[1], q[3]].map(p => ({ x: p.x, y: p.y }));
+}
+function setPoints(p) {
+  if (p.length === 6) { review.quad = [p[0], p[2], p[3], p[5]]; review.dots = [p[1], p[4]]; }
+  else review.quad = p.slice(0, 4);
+}
+// The dot not held slides onto the line from the page sides' vanishing point through the held
+// one ('seam': the bottom dot back on the line through the top one). The photo's size is passed
+// so a follower that would land beyond the photo stops at its edge, still on that line (a head
+// tapped at the photo's edge would otherwise leave it a fraction outside, and Save refuse).
+function followDots(p, held) { return Detect.dotsToVp(p, held, review.bmp.width, review.bmp.height); }
+function midMoved() { return review.kind === 6 && !!review.mid && review.mid.indexOf('moved') >= 0; }
+// After a corner moved: untouched dots follow their corners (halfway on the page's own
+// plane); moved ones keep the dashed line through the sides' vanishing point.
+function reseedDots() {
+  if (review.kind !== 6 || !review.quad) return;
+  if (!midMoved()) { const s = Detect.seedSix(review.quad); review.dots = [s[1], s[4]]; return; }
+  const p = followDots(cropPoints(), 'seam');
+  review.dots = [p[1], p[4]];
+}
+function commitTap(p) {
+  review.taps.push({ x: p.x, y: p.y });
+  review.tapActive = null;
+  review.loupe = null;
+  if (review.taps.length >= tapsNeeded()) { finishTaps(); return; }
+  updateTapPrompt();
+  drawReview();
+}
+function finishTaps() {
+  if (review.mode !== 'tap' || !review.bmp || review.taps.length < tapsNeeded()) return;
+  review.quad = orderQuad(review.taps);
+  if (review.kind === 6) {
+    const s = Detect.seedSix(review.quad);
+    review.dots = [s[1], s[4]];
+    review.mid = ['seed', 'seed'];
+  }
+  review.mode = 'adjust';
+  updateTapPrompt();
+  drawReview();
+}
+function cropInvalidWords(why) {
+  const W = CROP_WORDS.invalid;
+  if (why === 'close') return review.kind === 6 ? W.close6 : W.close4;
+  if (why === 'heights') return W.heights(cropWhat());
+  if (why === 'outside') return W.outside;
+  return W.cross(cropWhat());
+}
+function updateTapPrompt() {
+  const prompt = $('#tapPrompt');
+  if (!review.bmp) { prompt.classList.add('hidden'); return; }
+  const was = prompt.classList.contains('hidden') + '|' + $('#tapMsg').textContent;
+  prompt.classList.remove('hidden');
+  const tapping = review.mode === 'tap';
+  prompt.classList.toggle('tapping', tapping && !review.busy);   // drives the attention pulse
+  const need = tapsNeeded();
+  const n = tapping ? review.taps.length : need;
+  let pips = '';
+  for (let i = 0; i < need; i++) pips += `<i class="${i < n ? 'on' : ''}"></i>`;
+  $('#tapPips').innerHTML = pips;
+  const p = tapping ? null : cropPoints();
+  const v = p ? Detect.validShape(p, review.bmp.width, review.bmp.height) : { ok: true };
+  let msg;
+  if (review.busy) msg = CROP_WORDS.straightening;
+  else if (tapping) msg = CROP_WORDS.tap(cropWhat()) + (review.kind === 6 ? ' ' + CROP_WORDS.missing : '');
+  else if (!v.ok) msg = cropInvalidWords(v.why);
+  else if (review.kind === 6 && !midMoved()) msg = CROP_WORDS.dots[cropWhat() === 'flap' ? 'flap' : 'page'];
+  else msg = review.kind === 6 ? CROP_WORDS.adjust6 : CROP_WORDS.adjust4;
+  $('#tapMsg').textContent = msg;
+  prompt.classList.toggle('bad', !review.busy && !v.ok);
+  $('#btnUndo').textContent = tapping ? CROP_WORDS.buttons.undo : CROP_WORDS.buttons.again;
+  // The prompt is a row of its own under the photo: when its words change its height may too,
+  // and the photo is fitted again so none of it hides behind the row or the header.
+  if (was !== 'false|' + msg) reviewRefit();
+}
+// Fit the photo to the space the prompt row and the buttons leave (the size used is kept, so a
+// later change of that space is noticed: reviewRefit).
+let reviewFitting = false;
+function layoutReview() {
+  if (!review.bmp || reviewFitting) return;
+  reviewFitting = true;
+  try {
+    for (let i = 0; i < 3; i++) {
+      const wrap = $('#reviewWrap');
+      const w0 = wrap.clientWidth, h0 = wrap.clientHeight;
+      const cw = w0 || window.innerWidth || 360;
+      const ch = h0 || Math.max(200, (window.innerHeight || 700) - 130);
+      const bw = review.bmp.width, bh = review.bmp.height;
+      const sc = Math.min(cw / bw, ch / bh);
+      review.scale = sc;
+      review.dpr = Math.min(window.devicePixelRatio || 1, 2);
+      review.wrapW = w0;
+      review.wrapH = h0;
+      const canvas = $('#reviewCanvas');
+      canvas.width = Math.max(1, Math.round(bw * sc * review.dpr));
+      canvas.height = Math.max(1, Math.round(bh * sc * review.dpr));
+      canvas.style.width = Math.round(bw * sc) + 'px';
+      canvas.style.height = Math.round(bh * sc) + 'px';
+      drawReview();   // its prompt words may change the row's height: fit again if they did
+      if (wrap.clientWidth === w0 && wrap.clientHeight === h0) break;
+    }
+  } finally { reviewFitting = false; }
+}
+// Fit again when the space for the photo is no longer the size it was fitted to.
+function reviewRefit() {
+  if (!review.bmp || reviewFitting || !$('#scr-review').classList.contains('active')) return;
+  const wrap = $('#reviewWrap');
+  if (wrap.clientWidth !== review.wrapW || wrap.clientHeight !== review.wrapH) layoutReview();
+}
+window.addEventListener('resize', () => {
+  if ($('#scr-review').classList.contains('active')) layoutReview();
+});
+if (window.ResizeObserver) new ResizeObserver(() => reviewRefit()).observe($('#reviewWrap'));
+function fullQuad() {
+  const w = review.bmp.width, h = review.bmp.height;
+  return [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }];
+}
+/* quad edges, in corner order TL,TR,BR,BL: top, right, bottom, left (six points: Detect.EDGES6) */
+const EDGES = [[0, 1], [1, 2], [2, 3], [3, 0]];
+function edgesOf(q) { return q.length === 6 ? Detect.EDGES6 : EDGES; }
+function edgeMid(q, i) {
+  const [a, b] = edgesOf(q)[i];
+  return { x: (q[a].x + q[b].x) / 2, y: (q[a].y + q[b].y) / 2 };
+}
+function edgeNormal(q, i) {
+  const [a, b] = edgesOf(q)[i];
+  const dx = q[b].x - q[a].x, dy = q[b].y - q[a].y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: dy / len, y: -dx / len };
+}
+// inside the outline (any number of points)
+function pointInQuad(x, y, q) {
+  let inside = false;
+  for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+    const a = q[i], b = q[j];
+    if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+// how far the given points may slide along n before one leaves the image
+function slideLimits(pts, n) {
+  const w = review.bmp.width, h = review.bmp.height;
+  let lo = -Infinity, hi = Infinity;
+  for (const p of pts) {
+    for (const [v, c, max] of [[p.x, n.x, w], [p.y, n.y, h]]) {
+      if (Math.abs(c) < 1e-6) continue;
+      const t0 = (0 - v) / c, t1 = (max - v) / c;
+      lo = Math.max(lo, Math.min(t0, t1));
+      hi = Math.min(hi, Math.max(t0, t1));
+    }
+  }
+  return [lo, hi];
+}
+const MIN_CROP = 24;   // image px: a crop never collapses past this
+// A point kept on the photo: a slide stopped at the photo's edge by slideLimits can land a
+// rounding step beyond it (-2.8e-14), which validShape would call outside.
+function inPhoto(q) {
+  const w = review.bmp.width, h = review.bmp.height;
+  return { x: Math.max(0, Math.min(w, q.x)), y: Math.max(0, Math.min(h, q.y)) };
+}
+// What an edge's pill moves (`set`) and what it must not close on (`opp`), by index in role
+// order. Four points: its two corners, against the opposite edge. Six: a half of the head moves the
+// whole head (TL and TR, and TM once a dot was moved), against the foot, and the same for the
+// foot; a side moves its two corners, against the other side.
+function edgeGroup(p, i) {
+  if (p.length !== 6) { const [a, b] = EDGES[i], [c, d] = EDGES[(i + 2) % 4]; return { set: [a, b], opp: [c, d] }; }
+  const moved = midMoved();
+  if (i === 0 || i === 1) return { set: moved ? [0, 1, 2] : [0, 2], opp: [3, 4, 5] };
+  if (i === 3 || i === 4) return { set: moved ? [3, 4, 5] : [3, 5], opp: [0, 1, 2] };
+  const [a, b] = Detect.EDGES6[i], [c, d] = Detect.EDGES6[Detect.OPP6[i]];
+  return { set: [a, b], opp: [c, d] };
+}
+// How far an edge drag may go along its normal before a point it moves comes within MIN_CROP of
+// a point it must not close on, each measured from where the drag began (vinyl's oppositeLimits,
+// for a pill that may move more than two points).
+function oppositeLimits(d) {
+  let lo = -Infinity, hi = Infinity;
+  for (const j of d.set) for (const o of d.opp) {
+    const so = (d.p0[o].x - d.p0[j].x) * d.n.x + (d.p0[o].y - d.p0[j].y) * d.n.y;
+    if (so > 0) hi = Math.min(hi, so - MIN_CROP);
+    else lo = Math.max(lo, so + MIN_CROP);
+  }
+  return [lo, hi];
+}
+function closestOnSeg(px, py, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (!len2) return { x: a.x, y: a.y };
+  let t = ((px - a.x) * dx + (py - a.y) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + dx * t, y: a.y + dy * t };
+}
+const CROP_INK = '#d9a441', CROP_BAD = '#ff6b5b';
+function outlinePath(ctx, p, s) {
+  ctx.moveTo(p[0].x * s, p[0].y * s);
+  for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x * s, p[i].y * s);
+  ctx.closePath();
+}
+/* magnifier shown while a handle is being dragged — the fingertip covers
+   exactly the pixels you are trying to line the crop up against */
+function drawLoupe(ctx, canvas) {
+  const L = review.loupe;
+  if (!L) return;
+  const dpr = review.dpr;
+  const s = review.scale * dpr;
+  const R = Math.min(58 * dpr, canvas.width / 4, canvas.height / 4);
+  const pad = 10 * dpr;
+  // pin to whichever top corner is farther from the finger
+  const fx = L.x * s, fy = L.y * s;
+  const left = { x: pad + R, y: pad + R };
+  const right = { x: canvas.width - pad - R, y: pad + R };
+  const c = Math.hypot(fx - left.x, fy - left.y) > Math.hypot(fx - right.x, fy - right.y) ? left : right;
+  const k = s * LOUPE_ZOOM;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, R, 0, Math.PI * 2);
+  ctx.fillStyle = '#0d0d0d';
+  ctx.fill();
+  ctx.clip();
+  ctx.setTransform(k, 0, 0, k, c.x - L.x * k, c.y - L.y * k);
+  ctx.drawImage(review.bmp, 0, 0);
+  ctx.lineWidth = 1.5 * dpr / k;
+  ctx.strokeStyle = CROP_INK;
+  const p = review.mode === 'tap' ? null : cropPoints();
+  if (p) {
+    ctx.beginPath();
+    outlinePath(ctx, p, 1);
+    ctx.stroke();
+    if (p.length === 6) { ctx.beginPath(); ctx.moveTo(p[1].x, p[1].y); ctx.lineTo(p[4].x, p[4].y); ctx.stroke(); }
+  }
+  ctx.restore();
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // crosshair drawn in two passes — a dark halo under an amber core — so it
+  // stays visible over white pages as well as dark covers; long reticle
+  // (most of the loupe) so the exact aim point is easy to read
+  const cross = R * 0.72;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(c.x - cross, c.y); ctx.lineTo(c.x + cross, c.y);
+  ctx.moveTo(c.x, c.y - cross); ctx.lineTo(c.x, c.y + cross);
+  ctx.strokeStyle = 'rgba(0,0,0,.75)';
+  ctx.lineWidth = 4 * dpr;
+  ctx.stroke();
+  ctx.strokeStyle = CROP_INK;
+  ctx.lineWidth = 1.75 * dpr;
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, R, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(0,0,0,.6)';
+  ctx.lineWidth = 4 * dpr;
+  ctx.stroke();
+  ctx.strokeStyle = CROP_INK;
+  ctx.lineWidth = 2 * dpr;
+  ctx.stroke();
+  ctx.restore();
+}
+function fillPill(ctx, w, h, fill) {
+  const r = h / 2;
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(-w / 2, -h / 2, w, h, r);
+  } else {
+    ctx.moveTo(-w / 2 + r, -h / 2);
+    ctx.arcTo(w / 2, -h / 2, w / 2, h / 2, r);
+    ctx.arcTo(w / 2, h / 2, -w / 2, h / 2, r);
+    ctx.arcTo(-w / 2, h / 2, -w / 2, -h / 2, r);
+    ctx.arcTo(-w / 2, -h / 2, w / 2, -h / 2, r);
+    ctx.closePath();
+  }
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+function drawTapSeeds(ctx) {
+  const s = review.scale * review.dpr, dpr = review.dpr, taps = review.taps;
+  if (taps.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(taps[0].x * s, taps[0].y * s);
+    for (let i = 1; i < taps.length; i++) ctx.lineTo(taps[i].x * s, taps[i].y * s);
+    ctx.strokeStyle = 'rgba(217,164,65,.5)';
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.setLineDash([6 * dpr, 5 * dpr]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  taps.forEach((p, i) => {
+    ctx.beginPath();
+    ctx.arc(p.x * s, p.y * s, 9 * dpr, 0, 7);
+    ctx.fillStyle = CROP_INK;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.5)';
+    ctx.lineWidth = 2 * dpr;
+    ctx.stroke();
+    ctx.fillStyle = '#191204';
+    ctx.font = `${11 * dpr}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(i + 1), p.x * s, p.y * s);
+  });
+  const a = review.tapActive;
+  if (a) {
+    ctx.beginPath();
+    ctx.arc(a.x * s, a.y * s, 11 * dpr, 0, 7);
+    ctx.strokeStyle = 'rgba(0,0,0,.6)';
+    ctx.lineWidth = 4.5 * dpr;
+    ctx.stroke();
+    ctx.strokeStyle = CROP_INK;
+    ctx.lineWidth = 2 * dpr;
+    ctx.stroke();
+  }
+}
+// The small "top" tab on the edge that will be the top of the kept photo: each Rotate turns
+// it a quarter turn clockwise (rot 1: the left side becomes the top).
+const TOP_SIDE = [[0, 1], [3, 0], [2, 3], [1, 2]];
+function drawTopTab(ctx, q, s, col) {
+  const dpr = review.dpr, [ia, ib] = TOP_SIDE[review.rot % 4], a = q[ia], b = q[ib];
+  const cx = (q[0].x + q[1].x + q[2].x + q[3].x) / 4, cy = (q[0].y + q[1].y + q[2].y + q[3].y) / 4;
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+  let nx = mx - cx, ny = my - cy;
+  const nl = Math.hypot(nx, ny) || 1;
+  nx /= nl; ny /= nl;
+  ctx.save();
+  ctx.font = `700 ${11 * dpr}px system-ui, sans-serif`;
+  const tw = ctx.measureText(CROP_WORDS.top).width + 12 * dpr, th = 17 * dpr;
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const x = Math.max(tw / 2 + 2, Math.min(W - tw / 2 - 2, mx * s + nx * 16 * dpr));
+  const y = Math.max(th / 2 + 2, Math.min(H - th / 2 - 2, my * s + ny * 16 * dpr));
+  ctx.translate(x, y);
+  fillPill(ctx, tw, th, col);
+  ctx.fillStyle = '#191204';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(CROP_WORDS.top, 0, 0.5 * dpr);
+  ctx.restore();
+}
+function drawReview() {
+  const canvas = $('#reviewCanvas');
+  if (!review.bmp || !canvas.width) return;
+  const ctx = canvas.getContext('2d');
+  const s = review.scale * review.dpr, dpr = review.dpr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(review.bmp, 0, 0, canvas.width, canvas.height);
+  if (review.mode === 'tap') {
+    drawTapSeeds(ctx);
+    // A turn chosen before the corners are tapped is shown on the photo's own frame.
+    if (review.rot) drawTopTab(ctx, fullQuad(), s, CROP_INK);
+    drawLoupe(ctx, canvas);
+    updateTapPrompt();
+    return;
+  }
+  const p = cropPoints();
+  if (!p) return;
+  const ok = Detect.validShape(p, review.bmp.width, review.bmp.height).ok;
+  const col = ok ? CROP_INK : CROP_BAD;
+  ctx.beginPath();
+  ctx.rect(0, 0, canvas.width, canvas.height);
+  outlinePath(ctx, p, s);
+  ctx.fillStyle = 'rgba(0,0,0,.55)';
+  ctx.fill('evenodd');
+  ctx.beginPath();
+  outlinePath(ctx, p, s);
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 2 * dpr;
+  ctx.stroke();
+  const pill = (m, ang, small) => {
+    ctx.save();
+    ctx.translate(m.x * s, m.y * s);
+    ctx.rotate(ang);
+    fillPill(ctx, (small ? 22 : 34) * dpr, (small ? 12 : 17) * dpr, ok ? 'rgba(217,164,65,.35)' : 'rgba(255,107,91,.35)');
+    fillPill(ctx, (small ? 16 : 26) * dpr, (small ? 5 : 7) * dpr, col);
+    ctx.restore();
+  };
+  const E = edgesOf(p);
+  for (let i = 0; i < E.length; i++) {
+    const [a, b] = E[i];
+    // a short edge (a spine's head, a curl strip) keeps its pill, drawn smaller
+    pill(edgeMid(p, i), Math.atan2(p[b].y - p[a].y, p[b].x - p[a].x), Math.hypot(p[b].x - p[a].x, p[b].y - p[a].y) * review.scale < 70);
+  }
+  if (p.length === 6) {
+    // the dashed line between the round dots, with its own pill
+    ctx.beginPath();
+    ctx.moveTo(p[1].x * s, p[1].y * s);
+    ctx.lineTo(p[4].x * s, p[4].y * s);
+    ctx.setLineDash([7 * dpr, 6 * dpr]);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2 * dpr;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    pill({ x: (p[1].x + p[4].x) / 2, y: (p[1].y + p[4].y) / 2 }, Math.atan2(p[4].y - p[1].y, p[4].x - p[1].x), false);
+  }
+  for (const c of review.quad) {
+    ctx.beginPath();
+    ctx.arc(c.x * s, c.y * s, 11 * dpr, 0, 7);
+    ctx.fillStyle = ok ? 'rgba(217,164,65,.55)' : 'rgba(255,107,91,.55)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(c.x * s, c.y * s, 4.5 * dpr, 0, 7);
+    ctx.fillStyle = col;
+    ctx.fill();
+  }
+  // the round dots: hollow, unlike the corners
+  for (const c of review.dots || []) {
+    ctx.beginPath();
+    ctx.arc(c.x * s, c.y * s, 10 * dpr, 0, 7);
+    ctx.strokeStyle = 'rgba(0,0,0,.6)';
+    ctx.lineWidth = 5 * dpr;
+    ctx.stroke();
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2.5 * dpr;
+    ctx.stroke();
+  }
+  drawTopTab(ctx, review.quad, s, col);
+  drawLoupe(ctx, canvas);
+  updateTapPrompt();
+}
+const rc = $('#reviewCanvas');
+function reviewXY(e) {
+  const r = rc.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / review.scale, y: (e.clientY - r.top) / review.scale };
+}
+function capturePointer(e) {
+  try { rc.setPointerCapture(e.pointerId); } catch (err) { /* a pointer the page did not start */ }
+}
+rc.addEventListener('pointerdown', e => {
+  if (!review.bmp || review.busy) return;
+  const { x: px, y: py } = reviewXY(e);
+  const w = review.bmp.width, h = review.bmp.height;
+  if (review.mode === 'tap') {
+    if (review.taps.length >= tapsNeeded()) return;
+    review.tapActive = { x: Math.max(0, Math.min(w, px)), y: Math.max(0, Math.min(h, py)) };
+    review.loupe = review.tapActive;
+    capturePointer(e);
+    e.preventDefault();
+    drawReview();
+    return;
+  }
+  const q = review.quad;
+  if (!q) return;
+  const p = cropPoints();
+  // The nearest corner or round dot within reach; else the nearest pill; else the inside.
+  let best = null, bd = Infinity;
+  q.forEach((c, i) => { const d = Math.hypot(c.x - px, c.y - py); if (d < bd) { bd = d; best = { kind: 'corner', i }; } });
+  (review.dots || []).forEach((c, j) => { const d = Math.hypot(c.x - px, c.y - py); if (d < bd) { bd = d; best = { kind: 'dot', j }; } });
+  if (best && bd * review.scale <= 40) {
+    review.dragging = best;
+    const c = best.kind === 'corner' ? q[best.i] : review.dots[best.j];
+    review.loupe = { x: c.x, y: c.y };
+  } else {
+    let ei = -1, ed = Infinity;
+    const E = edgesOf(p);
+    for (let i = 0; i < E.length; i++) {
+      const m = edgeMid(p, i);
+      const d = Math.hypot(m.x - px, m.y - py);
+      if (d < ed) { ed = d; ei = i; }
+    }
+    let seam = false;
+    if (p.length === 6) {
+      const d = Math.hypot((p[1].x + p[4].x) / 2 - px, (p[1].y + p[4].y) / 2 - py);
+      if (d < ed) { ed = d; seam = true; }
+    }
+    if (ed * review.scale <= 38 && seam) {
+      const dx = p[4].x - p[1].x, dy = p[4].y - p[1].y, len = Math.hypot(dx, dy) || 1;
+      review.dragging = { kind: 'seam', n: { x: dy / len, y: -dx / len }, d0: [{ ...p[1] }, { ...p[4] }], sx: px, sy: py };
+      review.loupe = closestOnSeg(px, py, p[1], p[4]);
+    } else if (ed * review.scale <= 38) {
+      const [a, b] = E[ei], g = edgeGroup(p, ei);
+      review.dragging = {
+        kind: 'edge', i: ei, n: edgeNormal(p, ei), set: g.set, opp: g.opp, p0: p.map(c => ({ x: c.x, y: c.y })), sx: px, sy: py,
+      };
+      review.loupe = closestOnSeg(px, py, p[a], p[b]);
+    } else if (pointInQuad(px, py, p)) {
+      review.dragging = { kind: 'move', p0: p.map(c => ({ x: c.x, y: c.y })), sx: px, sy: py };
+      review.loupe = null;
+    } else return;
+  }
+  capturePointer(e);
+  e.preventDefault();
+  drawReview();
+});
+rc.addEventListener('pointermove', e => {
+  if (review.mode === 'tap') {
+    if (!review.tapActive || !review.bmp) return;
+    const w = review.bmp.width, h = review.bmp.height, t = reviewXY(e);
+    review.tapActive = { x: Math.max(0, Math.min(w, t.x)), y: Math.max(0, Math.min(h, t.y)) };
+    review.loupe = review.tapActive;
+    drawReview();
+    return;
+  }
+  if (!review.dragging || !review.bmp) return;
+  const w = review.bmp.width, h = review.bmp.height, t = reviewXY(e);
+  const px = Math.max(0, Math.min(w, t.x));
+  const py = Math.max(0, Math.min(h, t.y));
+  const d = review.dragging;
+  if (d.kind === 'corner') {
+    review.quad[d.i] = { x: px, y: py };
+    review.loupe = { x: px, y: py };
+    reseedDots();
+  } else if (d.kind === 'dot') {
+    // the held dot moves freely; the other slides onto the line from the vanishing point
+    const p = cropPoints();
+    p[d.j === 0 ? 1 : 4] = { x: px, y: py };
+    setPoints(followDots(p, d.j === 0 ? 'TM' : 'BM'));
+    review.mid = ['moved', 'moved'];
+    review.loupe = { x: px, y: py };
+  } else if (d.kind === 'seam') {
+    // both dots along the dashed line's normal, then the bottom one back on the line
+    const [lo, hi] = slideLimits(d.d0, d.n);
+    const k = Math.max(lo, Math.min(hi, (px - d.sx) * d.n.x + (py - d.sy) * d.n.y));
+    const p = cropPoints();
+    p[1] = inPhoto({ x: d.d0[0].x + d.n.x * k, y: d.d0[0].y + d.n.y * k });
+    p[4] = inPhoto({ x: d.d0[1].x + d.n.x * k, y: d.d0[1].y + d.n.y * k });
+    setPoints(followDots(p, 'seam'));
+    review.mid = ['moved', 'moved'];
+    review.loupe = closestOnSeg(px, py, review.dots[0], review.dots[1]);
+  } else if (d.kind === 'edge') {
+    const p = cropPoints(), [a, b] = edgesOf(p)[d.i];
+    const [bLo, bHi] = slideLimits(d.set.map(j => d.p0[j]), d.n);
+    const [oLo, oHi] = oppositeLimits(d);
+    const lo = Math.max(bLo, oLo), hi = Math.max(lo, Math.min(bHi, oHi));
+    const k = Math.max(lo, Math.min(hi, (px - d.sx) * d.n.x + (py - d.sy) * d.n.y));
+    for (const j of d.set) p[j] = inPhoto({ x: d.p0[j].x + d.n.x * k, y: d.p0[j].y + d.n.y * k });
+    // Six points: a pill on the head (or the foot) moves the whole head, both its halves: with the
+    // dots untouched they follow their corners, as after a corner; once a dot was moved, the head's
+    // dot moved with it and the other comes back onto the line through V. A side's pill moves its
+    // two corners, and the dots follow as after a corner.
+    if (p.length === 6 && midMoved() && (d.set.indexOf(1) >= 0 || d.set.indexOf(4) >= 0)) {
+      setPoints(followDots(p, d.set.indexOf(1) >= 0 ? 'TM' : 'BM'));
+    } else { setPoints(p); reseedDots(); }
+    review.loupe = closestOnSeg(px, py, p[a], p[b]);
+  } else if (d.kind === 'move') {
+    const xs = d.p0.map(c => c.x), ys = d.p0.map(c => c.y);
+    const dx = Math.max(-Math.min(...xs), Math.min(w - Math.max(...xs), px - d.sx));
+    const dy = Math.max(-Math.min(...ys), Math.min(h - Math.max(...ys), py - d.sy));
+    setPoints(d.p0.map(c => inPhoto({ x: c.x + dx, y: c.y + dy })));
+  }
+  drawReview();
+});
+function endDrag() {
+  if (review.mode === 'tap') {
+    if (review.tapActive) commitTap(review.tapActive);
+    return;
+  }
+  if (!review.dragging && !review.loupe) return;
+  review.dragging = null;
+  review.loupe = null;
+  drawReview();
+}
+function cancelDrag() {
+  if (review.mode === 'tap') {
+    review.tapActive = null;
+    review.loupe = null;
+    drawReview();
+    return;
+  }
+  endDrag();
+}
+rc.addEventListener('pointerup', endDrag);
+rc.addEventListener('pointercancel', cancelDrag);
+$('#btnUndo').onclick = () => {
+  if (!review.bmp || review.busy) return;
+  if (review.mode === 'tap') {
+    if (review.taps.length) review.taps.pop();
+    review.tapActive = null;
+    review.loupe = null;
+    updateTapPrompt();
+    drawReview();
+  } else {
+    enterTapMode();   // "Start again": the taps over (the turn chosen with Rotate stays)
+  }
+};
+$('#btnFull').onclick = () => wholePhoto();
+$('#btnRotate').onclick = () => {
+  if (!review.bmp || review.busy) return;
+  review.rot = (review.rot + 1) % 4;   // never clears her points
+  drawReview();
+};
+$('#btnRetake').onclick = () => { if (!review.busy) capBack(); };
+$('#btnSave').onclick = saveShot;
+
+function isAxisRect(q) {
+  const e = 2;
+  return Math.abs(q[0].x - q[3].x) < e && Math.abs(q[1].x - q[2].x) < e &&
+         Math.abs(q[0].y - q[1].y) < e && Math.abs(q[2].y - q[3].y) < e;
+}
+function rotateCanvas(c, rot) {
+  const r90 = rot % 2 === 1;
+  const out = document.createElement('canvas');
+  out.width = r90 ? c.height : c.width;
+  out.height = r90 ? c.width : c.height;
+  const ctx = out.getContext('2d');
+  ctx.translate(out.width / 2, out.height / 2);
+  ctx.rotate(rot * Math.PI / 2);
+  ctx.drawImage(c, -c.width / 2, -c.height / 2);
+  return out;
+}
+function releaseCanvas(c) { if (c) { c.width = 0; c.height = 0; } }
+// A canvas's JPEG, the canvas then released.
+function canvasJpeg(c, q) {
+  return new Promise((res, rej) => c.toBlob(b => { releaseCanvas(c); b ? res(b) : rej(new Error('JPEG encode failed')); }, 'image/jpeg', q));
+}
+// The share to scale a crop by so the kept photo fits in CROP_MAX_PX (1 when it already does). The
+// output is the outline's straightened size plus its margin, which for an outline near the edges of
+// a source already at the limit comes out larger than the source.
+function cropFit(p, axis = p.length === 4 && isAxisRect(p)) {
+  let w, h;
+  if (axis) {
+    const s = Detect.outputSize(p);
+    w = s.w + 2 * Math.round(CROP_MARGIN * s.w); h = s.h + 2 * Math.round(CROP_MARGIN * s.h);
+  } else {
+    const pl = Detect.cropPlan(p, p.length === 6 && midMoved(), CROP_MARGIN);
+    w = pl.OW; h = pl.OH;
+  }
+  const px = w * h;
+  // 0.995 and the floor below: headroom for the rounding of each side after scaling
+  return px > CROP_MAX_PX ? Math.sqrt(CROP_MAX_PX / px) * 0.995 : 1;
+}
+// The points scaled with the photo (each axis by its own whole-pixel share).
+function cropScaled(p, kx, ky) { return p.map(q => ({ x: q.x * kx, y: q.y * ky })); }
+// The straightened photo at the camera's own density, with the safety margin (grey beyond
+// the photo). Only the outline's box (and margin) is copied out of the photo first. A crop that
+// would come out over CROP_MAX_PX is made from the photo scaled down to fit (cropFit); `info.pts`
+// is given the points as cropped (scaled with it), for the margin the example records.
+function cropCanvas(p, info = {}) {
+  const bmp = review.bmp, m = CROP_MARGIN, axis = p.length === 4 && isAxisRect(p), k = cropFit(p, axis);
+  let W = bmp.width, H = bmp.height;
+  if (k < 1) {
+    const W0 = W, H0 = H;
+    W = Math.max(1, Math.floor(W0 * k)); H = Math.max(1, Math.floor(H0 * k));
+    p = cropScaled(p, W / W0, H / H0);
+  }
+  info.pts = p;
+  const sx = bmp.width / W, sy = bmp.height / H;   // photo pixels per working pixel (1 unless scaled)
+  if (axis) {
+    // an upright rectangle: no warp, the same margin
+    const s = Detect.outputSize(p), tu = Math.round(m * s.w), tv = Math.round(m * s.h);
+    const x0 = Math.min(p[0].x, p[3].x), y0 = Math.min(p[0].y, p[1].y);
+    const cw = Math.max(1, Math.max(p[1].x, p[2].x) - x0), ch = Math.max(1, Math.max(p[2].y, p[3].y) - y0);
+    const kx = cw / s.w, ky = ch / s.h;
+    const out = document.createElement('canvas');
+    out.width = s.w + 2 * tu; out.height = s.h + 2 * tv;
+    const g = out.getContext('2d');
+    g.fillStyle = '#808080';
+    g.fillRect(0, 0, out.width, out.height);
+    const sx0 = Math.max(0, x0 - tu * kx), sy0 = Math.max(0, y0 - tv * ky);
+    const sx1 = Math.min(W, x0 + cw + tu * kx), sy1 = Math.min(H, y0 + ch + tv * ky);
+    if (sx1 > sx0 && sy1 > sy0) {
+      g.imageSmoothingEnabled = true;
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(bmp, sx0 * sx, sy0 * sy, (sx1 - sx0) * sx, (sy1 - sy0) * sy, tu + (sx0 - x0) / kx, tv + (sy0 - y0) / ky, (sx1 - sx0) / kx, (sy1 - sy0) / ky);
+    }
+    return out;
+  }
+  const box = Detect.cropBox(p, m, W, H);
+  const c = document.createElement('canvas');
+  c.width = box.w; c.height = box.h;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  if (k < 1) { g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; }
+  g.drawImage(bmp, box.x * sx, box.y * sy, box.w * sx, box.h * sy, 0, 0, box.w, box.h);
+  const src = { img: g.getImageData(0, 0, box.w, box.h), x0: box.x, y0: box.y, W, H };
+  releaseCanvas(c);
+  const data = p.length === 4 ? Detect.cropFour(src, p, m) : Detect.cropSix(src, p, midMoved(), m);
+  src.img = null;
+  const out = document.createElement('canvas');
+  out.width = data.width; out.height = data.height;
+  out.getContext('2d').putImageData(data, 0, 0);
+  return out;
+}
+// The training copy: the uncropped frame as oriented, CROP_SMALL px or less on its longest
+// side, re-encoded through a canvas (no EXIF, no location). Made only when an example will be
+// banked (the setting on, or the crop test).
+function cropBanks() { return capT.kind === 'trial' || (CROP_ON && settings.logCrops !== false); }
+async function cropSmallCopy(bmp = review.bmp) {
+  if (!cropBanks()) return null;
+  const sc = Math.min(1, CROP_SMALL / Math.max(bmp.width, bmp.height));
+  const w = Math.max(2, Math.round(bmp.width * sc)), h = Math.max(2, Math.round(bmp.height * sc));
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(bmp, 0, 0, w, h);
+  const blob = await canvasJpeg(c, 0.85);
+  return { blob, w, h, kx: w / bmp.width, ky: h / bmp.height };
+}
+// The margin the kept photo has, per side [top, right, bottom, left].
+function cropPad(kind, moved, p) {
+  let pad = null;
+  try { pad = Detect.padOf(kind, moved, p); } catch (e) { pad = null; }
+  if (Array.isArray(pad) && pad.length === 4 && pad.every(v => typeof v === 'number' && isFinite(v))) return pad.slice();
+  const m = CROP_MARGIN;
+  if (kind === 4) return [m, m, m, m];
+  if (!moved) return [m, 0, m, 0];
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  return (d(p[0], p[1]) + d(p[5], p[4])) >= (d(p[1], p[2]) + d(p[4], p[3])) ? [m, 0, m, m] : [m, m, m, 0];
+}
+// Save: straighten, turn, and hand the cropped photo to the check. Nothing is stored here:
+// the photo and its example are kept only at "Yes - keep".
+async function saveShot() {
+  if (!review.bmp || review.busy) return;
+  if (review.mode === 'tap') { toast($('#tapMsg').textContent, 3000); return; }
+  const p = cropPoints();
+  const v = Detect.validShape(p, review.bmp.width, review.bmp.height);
+  if (!v.ok) { toast(cropInvalidWords(v.why), 4000); drawReview(); return; }
+  // The crop screen this Save began on. While it is busy no button and no header Back leaves it;
+  // should it still be left (another screen opened over it), what this Save made is dropped and
+  // nothing opens on top of the screen she is now on.
+  const r = review, btn = $('#btnSave');
+  r.busy = true;
+  btn.disabled = true;
+  updateTapPrompt();
+  await new Promise(res => setTimeout(res, 40)); // let "Straightening…" paint before the warp
+  const t0 = performance.now();
+  let out = null;
+  try {
+    if (review !== r) return;
+    const info = {};
+    out = cropCanvas(p, info);
+    if (r.rot) { const c = rotateCanvas(out, r.rot); releaseCanvas(out); out = c; }
+    const moved = midMoved();
+    const pend = {
+      crop: r.kind, points: p, rot: r.rot, mid: r.kind === 6 ? r.mid.slice() : null,
+      pad: cropPad(r.kind, moved, info.pts || p), small: await cropSmallCopy(r.bmp),
+    };
+    if (review !== r) { releaseCanvas(out); out = null; return; }
+    r.pending = pend;
+    r.saveMs = Math.round(performance.now() - t0);
+  } catch (e) {
+    releaseCanvas(out);
+    out = null;
+    if (review !== r) return;
+    console.error('crop save', e);
+    if (capT.kind === 'trial') cropTrialFail('Save', e);
+    toast(CROP_WORDS.saveFailed, 5000);
+  } finally {
+    r.busy = false;
+    btn.disabled = false;
+    if (review === r && r.bmp) drawReview();
+  }
+  if (out && review === r) openGate(out);
+}
+// Whole photo (vinyl's Full): to the check uncropped, banked with the whole frame as its outline.
+// The turn the "top" tab shows (Rotate) is kept on it as on a crop: what the screen shows is what
+// is kept.
+async function wholePhoto() {
+  if (!review.bmp || review.busy) return;
+  const r = review;
+  r.busy = true;
+  const t0 = performance.now();
+  let small = null, out = r.bmp;
+  try { small = await cropSmallCopy(r.bmp); } catch (e) { console.error('crop: small copy', e); }
+  finally { r.busy = false; }
+  if (review !== r || !r.bmp) return;
+  if (r.rot) {
+    try { out = rotateCanvas(r.bmp, r.rot); }
+    catch (e) {
+      console.error('crop: whole photo turn', e);
+      if (capT.kind === 'trial') cropTrialFail('Whole photo', e);
+      toast(CROP_WORDS.saveFailed, 5000);
+      return;
+    }
+  }
+  r.pending = { crop: 'whole', points: fullQuad(), rot: r.rot, mid: null, pad: [0, 0, 0, 0], small };
+  r.saveMs = Math.round(performance.now() - t0);
+  openGate(out);
+}
+
+/* ---------- crop training examples ----------
+ * One example per cropped photo she keeps, banked at "Yes - keep" (a rejected frame is never
+ * banked): the small copy and a small file of the points, with no author, title, name, id or
+ * note. They wait in the `kv` store (keys crop:<bookId>:<shotId>, so a re-take replaces the
+ * waiting one; the database stays at version 2), and go up only from inside pumpUploads, when
+ * no shelf or book is waiting, after their own book's book.json. The phone writes them ONLY
+ * into the drop folder CROP_FOLDER in her upload folder, found by id from the shelf's own
+ * folder (requestRootFolder), never by name; the curator's sheet copies them from there into
+ * the central training library. The code never reads the whole `kv` store (dbAll): keys by
+ * range, one entry at a time. */
+const CROP_KEYS = 'crop:';
+const CROP_TRIAL_ID = 'croptest-';
+const CROP_TRIAL_FLAG = 'cropTrialLeft';   // kv: a crop test wrote something; the next start sweeps
+// A photo's `crop` in book.json (4, 6 or "whole"), only on a shot that went through the crop
+// screen: never on a shot with no crop kind, or on a photo an older build took.
+function cropField(c) { return c === 4 || c === 6 || c === 'whole' ? { crop: c } : {}; }
+function cropRange(prefix) { return IDBKeyRange.bound(prefix, prefix + '￿'); }
+// The examples waiting on this phone (never the crop test's), by key.
+async function cropWaitingKeys(prefix = CROP_KEYS) {
+  const keys = await reqP((await db()).transaction('kv').objectStore('kv').getAllKeys(cropRange(prefix)));
+  return keys.filter(k => String(k).indexOf(CROP_KEYS + CROP_TRIAL_ID) !== 0);
+}
+// The examples waiting that count against CROP_CAP: not the crop test's, not one whose shelf's
+// folder could not be found (goneAt, kept until that is settled), and not `except` (a re-take
+// replacing its own). One entry at a time, by range.
+async function cropLiveCount(except) {
+  const os = (await db()).transaction('kv').objectStore('kv');
+  return new Promise((res, rej) => {
+    let n = 0;
+    const r = os.openCursor(cropRange(CROP_KEYS));
+    r.onsuccess = () => {
+      const c = r.result;
+      if (!c) { res(n); return; }
+      const k = String(c.key);
+      if (k !== except && k.indexOf(CROP_KEYS + CROP_TRIAL_ID) !== 0 && !(c.value && c.value.goneAt)) n++;
+      c.continue();
+    };
+    r.onerror = () => rej(r.error);
+  });
+}
+async function cropDelete(prefix) {
+  return reqP((await db()).transaction('kv', 'readwrite').objectStore('kv').delete(cropRange(prefix)));
+}
+// Delete one example only if it is still the one with this id (a re-take may have replaced it).
+async function cropDropIf(key, id) {
+  const tx = (await db()).transaction('kv', 'readwrite'), os = tx.objectStore('kv');
+  return new Promise((res, rej) => {
+    const g = os.get(key);
+    g.onsuccess = () => { if (g.result && g.result.meta && g.result.meta.id === id) os.delete(key); };
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error || new Error('crop: drop'));
+  });
+}
+function cropRandom(n) {
+  const a = 'abcdefghijklmnopqrstuvwxyz0123456789', u = new Uint8Array(n);
+  crypto.getRandomValues(u);
+  return Array.from(u, b => a[b % 36]).join('');
+}
+// The per-phone salt: made once, kept in `kv`, never sent.
+async function cropSaltOf() {
+  let s = await dbGet('kv', 'cropSalt');
+  if (typeof s !== 'string' || !s) { s = cropRandom(32); await dbPut('kv', s, 'cropSalt'); }
+  return s;
+}
+// Groups one copy's photos (its spot-check and its whole book share the request's Book ID)
+// without naming it: the first 16 hex of SHA-256 of the salt and the Book ID.
+async function cropGroup(id) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode((await cropSaltOf()) + String(id)));
+  return Array.from(new Uint8Array(buf).slice(0, 8), b => b.toString(16).padStart(2, '0')).join('');
+}
+// Bank one example for a kept photo. Never fails the Keep; returns whether it was banked.
+async function logCrop(pend, kind, shot, bk) {
+  try {
+    if (!pend || !pend.small) return false;
+    const trial = kind === 'trial';
+    if (!trial && !(CROP_ON && settings.logCrops !== false)) return false;
+    const bookId = trial ? (cropTrial && cropTrial.bookId) : bk && bk.id;
+    if (!bookId) return false;
+    const key = CROP_KEYS + bookId + ':' + shot;
+    // At the cap no more are kept (a re-take still replaces its own); none is ever dropped.
+    if (!trial && (await cropLiveCount(key)) >= CROP_CAP) { updateCropStat(); return false; }
+    const sm = pend.small, r1 = v => Math.round(v * 10) / 10;
+    const six = pend.points.length === 6;
+    const meta = {
+      id: 'crop_' + Date.now() + '_' + cropRandom(5),
+      when: new Date().toISOString(),
+      app: APP_VERSION,
+      shot: { id: shot, template: kind === 'book' ? 'spot' : trial ? 'hc' : (bk.template || ''), points: CROP_POINTS[shot] || 0 },
+      group: await cropGroup(trial ? bookId : (bk.requestBookId || bk.id)),
+      image: { w: sm.w, h: sm.h },
+      rot: pend.rot || 0,
+      shape: six ? 'six' : 'quad',
+      geom: pend.points.map(q => [r1(q.x * sm.kx), r1(q.y * sm.ky)]),
+    };
+    if (six) meta.mid = pend.mid ? pend.mid.slice() : ['seed', 'seed'];
+    Object.assign(meta, { proposal: null, source: pend.crop === 'whole' ? 'whole' : 'manual', pad: pend.pad.slice() });
+    const entry = { blob: sm.blob, meta, shelfFolderId: trial ? '' : String((bk.shelfRef && bk.shelfRef.shelfFolderId) || ''), bookId };
+    if (trial) entry.trial = true;
+    await dbPut('kv', entry, key);
+    return true;
+  } catch (e) { console.error('crop log', e); return false; }
+}
+// The one-time note at the first photo kept from the crop screen (cropped or whole): she sees
+// it, and its Turn it off, before anything is sent (an example leaves only with a later upload,
+// after its book). Its Turn it off acts at once; the Settings box waits for Save settings.
+async function cropNoteOnce() {
+  try {
+    if (await dbGet('kv', 'cropNoted')) return;
+    $('#cropNoteText').textContent = CROP_WORDS.note;
+    $('#btnCropNoteOk').textContent = CROP_WORDS.noteOk;
+    $('#btnCropNoteOff').textContent = CROP_WORDS.noteOff;
+    $('#cropNote').classList.remove('hidden');
+  } catch (e) { console.error('crop note', e); }
+}
+$('#btnCropNoteOk').onclick = async () => {
+  $('#cropNote').classList.add('hidden');
+  await dbPut('kv', Date.now(), 'cropNoted');
+};
+$('#btnCropNoteOff').onclick = async () => {
+  $('#cropNote').classList.add('hidden');
+  await dbPut('kv', Date.now(), 'cropNoted');
+  await cropLogOff();
+};
+// "Help improve the cropping" off: no new examples, and the unsent ones are deleted. Called by
+// the note's Turn it off, at once; the Settings box does the same only when Save settings is
+// tapped (see #btnSaveSettings).
+async function cropLogOff() {
+  settings.logCrops = false;
+  await saveSettings();
+  await cropDelete(CROP_KEYS);
+  updateCropStat();
+}
+async function updateCropStat() {
+  const el = $('#cropStat');
+  if (!el) return;
+  try {
+    const waiting = (await cropWaitingKeys()).length;
+    const sent = Number(await dbGet('kv', 'cropStat')) || 0;
+    el.textContent = !waiting && !sent ? ''
+      : CROP_WORDS.stat(sent + waiting, sent, waiting) + ((await cropLiveCount()) >= CROP_CAP ? ' ' + CROP_WORDS.statFull : '');
+  } catch (e) { el.textContent = ''; }
+}
+// Send at most one waiting example (its picture, then its small file), or tidy one picture left
+// alone, and say whether one was dealt with (true: call again; false: nothing more now). Called only
+// from inside pumpUploads, when no shelf or book is queued, uploading or paused; it returns after
+// each example it tried in Drive, so a book queued meanwhile goes next. A pair that cannot go now
+// waits: a stale sign-in, a failure or a 401 is a console line, never Google's sign-in (only a tap
+// may open it), never a change to a book's state.
+const CROP_WAIT = new Error('crop: waiting for a fresh sign-in');
+const cropSkip = new Set();     // examples that failed this session for a reason other than the connection
+const CROP_GONE_DAYS = 30;      // a shelf's folder still missing this long after first seen so (longer than Drive's bin)
+const CROP_LOOSE = 'cropLoose'; // kv: { <key>: { id, file } }: a picture sent whose small file has not followed yet
+let rootReachedWith = null;     // the sign-in a request's upload folder was last reached with (requestRootFolder)
+// Is this example still wanted: the step and the switch on, and the entry still this one (not
+// deleted by Save settings, the note's Turn it off or its book leaving, nor replaced by a re-take)?
+async function cropStill(key, id) {
+  if (!CROP_ON || settings.logCrops === false) return false;
+  const e = await dbGet('kv', key);
+  return !!(e && e.meta && e.meta.id === id);
+}
+// Change one waiting example in place, only while it is still the one with this id.
+async function cropEdit(key, id, fn) {
+  const tx = (await db()).transaction('kv', 'readwrite'), os = tx.objectStore('kv');
+  return new Promise((res, rej) => {
+    const g = os.get(key);
+    g.onsuccess = () => { const e = g.result; if (e && e.meta && e.meta.id === id) os.put(fn(e), key); };
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error || new Error('crop: edit'));
+  });
+}
+// The record of pictures sent without their small file yet (null removes one; the key goes when empty).
+async function cropLooseSet(key, rec) {
+  const all = (await dbGet('kv', CROP_LOOSE)) || {};
+  if (rec) all[key] = rec; else delete all[key];
+  if (Object.keys(all).length) await dbPut('kv', all, CROP_LOOSE); else await dbDel('kv', CROP_LOOSE);
+}
+// Move a file this app made to the Drive bin (drive.file allows it).
+function driveTrash(id) {
+  return drive(DRIVE_FILES + encodeURIComponent(id) + '?fields=id', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }),
+  });
+}
+// A picture sent whose example is no longer wanted (turned off, deleted or replaced before its small
+// file followed) goes to the Drive bin, one per call. One still wanted is left: its pair is finished
+// by the next try (the picture replaced in place).
+async function cropTidy() {
+  const loose = (await dbGet('kv', CROP_LOOSE)) || {};
+  for (const key of Object.keys(loose)) {
+    const rec = loose[key] || {};
+    if (cropSkip.has(CROP_LOOSE + key) || (rec.id && await cropStill(key, rec.id))) continue;
+    if (!tokenFresh()) return false;
+    try { if (rec.file) await driveTrash(rec.file); }
+    catch (err) {
+      if (!(err && err.status === 404)) {   // a file already gone needs nothing more
+        console.error('crop tidy', key, String((err && err.message) || err));
+        if (!isOffline(err)) cropSkip.add(CROP_LOOSE + key);
+        return false;
+      }
+    }
+    await cropLooseSet(key, null);
+    return true;
+  }
+  return false;
+}
+async function syncCropLogs() {
+  try {
+    if (!CROP_ON || !tokenFresh()) return false;
+    if (await cropTidy()) return true;
+    if (settings.logCrops === false) return false;
+    for (const key of await cropWaitingKeys()) {
+      if (cropSkip.has(key)) continue;
+      const e = await dbGet('kv', key);
+      if (!e || !e.blob || !e.meta || e.trial) continue;
+      const bk = await dbGet('books', e.bookId);
+      if (!bk) { await cropDropIf(key, e.meta.id); continue; }   // its book has left the phone: so does it
+      if (!bk.uploaded || uploadActive(bk)) continue;            // only after its own book's book.json
+      // Every Drive step starts only on a sign-in with time left; renewing one is a tap's job.
+      const step = fn => { if (!tokenFresh()) throw CROP_WAIT; return fn(); };
+      try {
+        // Her upload folder, found by id from the shelf's own folder, for every pair: never
+        // rootCache or the folder named in Settings (resolveRootFolder), which find or make a
+        // root by name; and a drop folder she has deleted is made again, never written into.
+        const root = await step(() => requestRootFolder(e.shelfFolderId));
+        if (e.goneAt) await cropEdit(key, e.meta.id, x => { delete x.goneAt; return x; });   // found again
+        const folder = await step(() => findOrCreateFolder(CROP_FOLDER, root.id));
+        // Turned off, deleted or replaced while the folder was found: nothing is sent (another
+        // try only if the example itself changed; turned off, nothing more now).
+        if (!(await cropStill(key, e.meta.id))) return CROP_ON && settings.logCrops !== false;
+        const up = await step(() => uploadFile(folder, e.meta.id + '.jpg', 'image/jpeg', e.blob));
+        await cropLooseSet(key, { id: e.meta.id, file: (up && up.id) || '' });
+        // Turned off (or the example gone) while the picture went up: it goes to the bin, never
+        // left in her folder without its small file, and the small file is not sent.
+        if (!(await cropStill(key, e.meta.id))) return await cropTidy();
+        await step(() => uploadFile(folder, e.meta.id + '.json', 'application/json',
+          new Blob([JSON.stringify(e.meta)], { type: 'application/json' })));
+        await cropLooseSet(key, null);
+        await cropDropIf(key, e.meta.id);
+        await dbPut('kv', (Number(await dbGet('kv', 'cropStat')) || 0) + 1, 'cropStat');
+        if ($('#scr-settings').classList.contains('active')) updateCropStat();
+        return true;
+      } catch (err) {
+        const msg = String((err && err.message) || err);
+        console.error('crop sync', key, msg);
+        if (msg === SHELF_GONE && err.gone === 'nokey') {
+          // No shelf folder recorded at all: it can never be delivered, so it leaves the phone.
+          await cropDropIf(key, e.meta.id);
+          if ($('#scr-settings').classList.contains('active')) updateCropStat();
+          return true;
+        }
+        if (msg === SHELF_GONE && /^(missing|bin|moved)$/.test(err.gone || '')) {
+          // Its shelf's folder was not found (deleted, in the bin, moved, or this phone is signed
+          // in to another Google account): that may be put right, so the example is kept, out of
+          // the count against the cap. It leaves the phone only when, more than a month after it
+          // was first not found, the folder is still not there while another shelf's folder was
+          // reached with this same sign-in (so the account is the right one). Nothing was sent.
+          const at = Number(e.goneAt) || 0;
+          if (at && Date.now() - at > CROP_GONE_DAYS * 864e5 && rootReachedWith && rootReachedWith === tokenInfo.token) {
+            await cropDropIf(key, e.meta.id);
+          } else {
+            if (!at) await cropEdit(key, e.meta.id, x => Object.assign(x, { goneAt: Date.now() }));
+            cropSkip.add(key);
+          }
+          if ($('#scr-settings').classList.contains('active')) updateCropStat();
+          return true;
+        }
+        // Anything else (a refusal, a rate limit, a server error) keeps the example: skipped
+        // for this session, unless it was the connection or the sign-in.
+        if (err !== CROP_WAIT && !isOffline(err) && !/\b401\b|sign-in|token/i.test(msg)) cropSkip.add(key);
+        return false;
+      }
+    }
+    return false;
+  } catch (e) { console.error('crop sync', e); return false; }
+}
+
+/* ---------- the crop test (?crop=1) ----------
+ * For the curator, on the phone it is meant for, before the crop step is switched on: the
+ * camera, the crop screen, the check and the whole Keep path (the JPEG, the thumbnail, the
+ * small copy and its `kv` write) on a throwaway book that nothing uploads. Each photo is timed
+ * and then deleted with its example; nothing is stored once the test ends. Session only: the
+ * address opens it, nothing remembers it. */
+let CROP_TRIAL = /[?&]crop=1(?:&|$)/.test(location.search);
+let cropTrial = null;   // { bookId, n, rows } while the test runs
+const TRIAL_SHOTS = ['27', '05', '11', '03', '06', '09', '08', '10', '14', '20', '12', '01'];
+$('#btnCropTest').onclick = () => openCropTrial();
+function openCropTrial() {
+  if (!cropTrial) cropTrial = { bookId: CROP_TRIAL_ID + Date.now().toString(36), n: 0, rows: [] };
+  backToTrial();
+}
+function backToTrial() {
+  stopCam();
+  stopLevel();
+  freeGate();
+  freeReview();
+  stopVoice();
+  if (!cropTrial) return goHome();
+  const W = CROP_WORDS.trial;
+  show('scr-croptest', { title: W.title, back: endCropTrial });
+  $('#ctIntro').textContent = W.intro;
+  $('#btnCtShoot').textContent = W.shoot;
+  $('#btnCtDone').textContent = W.done;
+  const list = $('#ctList');
+  list.innerHTML = '';
+  for (const r of cropTrial.rows) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = r.fail ? W.fail(r) : W.row(r);
+    list.appendChild(p);
+  }
+  const ok = cropTrial.rows.filter(r => !r.fail);
+  if (cropTrial.rows.length) {
+    const p = document.createElement('p');
+    p.className = 'ct-sum';
+    p.textContent = W.sum({ n: cropTrial.rows.length, fails: cropTrial.rows.length - ok.length,
+      maxSave: Math.max(0, ...ok.map(r => r.saveMs)), avgSave: ok.length ? Math.round(ok.reduce((a, r) => a + r.saveMs, 0) / ok.length) : 0,
+      maxKeep: Math.max(0, ...ok.map(r => r.keepMs)) });
+    list.appendChild(p);
+  }
+}
+async function openTrialCamera() {
+  if (!cropTrial) return goHome();
+  const shot = TRIAL_SHOTS[cropTrial.n % TRIAL_SHOTS.length];
+  const s = fullShotDef('hc', shot) || BOOK_SHOTS.find(x => x.id === shot) || {};
+  capT = { kind: 'trial', shot };
+  freeGate();
+  freeReview();
+  stopLevel();
+  show('scr-camera', { title: CROP_WORDS.trial.title, back: backToTrial });
+  $('#camLabel').textContent = `${shot} ${shotName(shot)}`;
+  $('#camTip').textContent = s.tip || '';
+  $('#camFallback').classList.add('hidden');
+  await startCam();
+}
+$('#btnCtShoot').onclick = () => openTrialCamera();
+$('#btnCtDone').onclick = () => endCropTrial();
+// The whole Keep path on the throwaway book, timed; then the photo and its example go.
+async function keepTrialShot(shot, bmp, blob, pend, t0) {
+  const t = cropTrial;
+  if (!t) return goHome();
+  // Before the test's first write: a mark that something of it may be left on the phone, so the
+  // next start sweeps it up (without the mark, a start writes nothing).
+  if (!t.marked) { await dbPut('kv', 1, CROP_TRIAL_FLAG); t.marked = true; }
+  let thumb = null;
+  try { thumb = await makeThumb(bmp); } catch (e) { thumb = null; }
+  await dbPut('shots', { bookId: t.bookId, shotId: shot, blob, thumb, w: bmp.width, h: bmp.height, when: Date.now(), ...(pend ? { crop: pend.crop } : {}) });
+  const banked = pend ? await logCrop(pend, 'trial', shot, null) : false;
+  const keepMs = Math.round(performance.now() - t0);
+  t.n++;
+  t.rows.push({ n: t.n, shot, kind: CROP_POINTS[shot] || 0, whole: !!pend && pend.crop === 'whole', src: review.src || { w: bmp.width, h: bmp.height },
+    cap: review.cap, w: bmp.width, h: bmp.height, saveMs: review.saveMs, keepMs, banked });
+  await cropTrialClean(t.bookId);
+  backToTrial();
+}
+function cropTrialFail(at, e) {
+  if (!cropTrial) return;
+  cropTrial.n++;
+  cropTrial.rows.push({ fail: true, n: cropTrial.n, shot: capT.shot, at, msg: String((e && e.message) || e).slice(0, 80) });
+}
+async function cropTrialClean(bookId) {
+  await reqP((await db()).transaction('shots', 'readwrite').objectStore('shots').delete(IDBKeyRange.bound([bookId, '00'], [bookId, '99'])));
+  await cropDelete(CROP_KEYS + bookId + ':');
+}
+async function endCropTrial() {
+  const t = cropTrial;
+  cropTrial = null;
+  if (t) await cropTrialSweep();   // its photos and examples, and the mark
+  goHome();
+}
+// Anything a crop test left behind (the app closed mid-test), and the test's mark.
+async function cropTrialSweep() {
+  const lo = CROP_TRIAL_ID, hi = CROP_TRIAL_ID + '￿';
+  await reqP((await db()).transaction('shots', 'readwrite').objectStore('shots').delete(IDBKeyRange.bound([lo, ''], [hi, '￿'])));
+  await cropDelete(CROP_KEYS + CROP_TRIAL_ID);
+  await dbDel('kv', CROP_TRIAL_FLAG);
+}
+// At start: the sweep runs only when a crop test left its mark, or the test is open (?crop=1).
+// Otherwise a start makes no write for the crop step (a read of the mark only).
+async function cropTrialStart() {
+  if (CROP_TRIAL || await dbGet('kv', CROP_TRIAL_FLAG)) await cropTrialSweep();
 }
 
 /* ---------- level line ----------
@@ -835,20 +2218,44 @@ function stopLevel() {
  */
 const LOUPE_ZOOM = 3;
 let gate = { bmp: null, scale: 1, dpr: 1, loupe: null, drag: false };
+// The image the check shows: an ImageBitmap (closed here), or a cropped photo's canvas
+// (released: a canvas has no close). Never the crop screen's original, which Whole photo
+// shows as it is and freeReview closes.
 function freeGate() {
-  if (gate.bmp && gate.bmp.close) gate.bmp.close();
+  const b = gate.bmp;
+  if (b && b !== review.bmp) {
+    if (b.close) b.close();
+    else if (typeof HTMLCanvasElement !== 'undefined' && b instanceof HTMLCanvasElement) releaseCanvas(b);
+  }
   gate = { bmp: null, scale: 1, dpr: 1, loupe: null, drag: false };
 }
+// A photo from the crop screen: the original is still held, and its example was made at Save.
+// This is true after Whole photo too, so the check offers Fix the crop then as well: it goes
+// back to the crop screen with the original, where the photo can still be cropped.
+function gateFromCrop() { return !!(review.bmp && review.pending); }
 function openGate(bmp) {
   stopCam();
   stopLevel();
   freeGate();
   gate.bmp = bmp;
   gate.loupe = { x: bmp.width / 2, y: bmp.height / 2 };
-  const s = capT.kind === 'book' ? BOOK_SHOTS.find(x => x.id === capT.shot)
-    : capT.kind === 'full' && curBook ? fullShotDef(curBook.template, capT.shot) : null;
-  $('#gatePrompt').textContent = s && s.gate ? s.gate : SHELF_GATE;
-  show('scr-gate', { title: 'Can you read it?', back: capBack });
+  const s = capShotDef();
+  const crop = gateFromCrop();
+  let line = s && s.gate ? s.gate : SHELF_GATE;
+  // Of a cropped page: is it all there? 12 names the number line at the foot.
+  if (crop && cropWhat(capT.shot, capTemplate()) === 'page')
+    line = (capT.shot === '12' ? CROP_WORDS.gate12 : line) + ' ' + CROP_WORDS.gatePage;
+  const gp = $('#gatePrompt');
+  gp.textContent = line;
+  // A photo from the crop screen fills the image to its edges, so its question goes in a row
+  // under the photo (as on the crop screen) and never covers the head of the page it asks about.
+  // Any other photo keeps the question over the image, as before.
+  if (crop) { if (gp.parentNode !== $('#scr-gate')) $('#scr-gate').insertBefore(gp, $('#gateBar')); }
+  else if (gp.parentNode !== $('#gateWrap')) $('#gateWrap').appendChild(gp);
+  gp.classList.toggle('row', crop);
+  $('#btnFixCrop').textContent = CROP_WORDS.buttons.fix;
+  $('#btnFixCrop').classList.toggle('hidden', !crop);
+  show('scr-gate', { title: 'Can you read it?', back: crop ? backToReview : capBack });
   layoutGate();
 }
 function layoutGate() {
@@ -928,16 +2335,23 @@ gc.addEventListener('pointerup', () => { gate.drag = false; });
 gc.addEventListener('pointercancel', () => { gate.drag = false; });
 window.addEventListener('resize', () => { if ($('#scr-gate').classList.contains('active')) layoutGate(); });
 $('#btnReshoot').onclick = () => capBack();
+$('#btnFixCrop').onclick = () => backToReview();
 $('#btnKeep').onclick = keepFrame;
-// Full resolution, no crop, no level: the frame is re-encoded from the
-// oriented bitmap so the file needs no EXIF rotation to read right, and at
-// the highest quality the client chose. A spine's publisher line is 10 px tall.
+// Full resolution, no level: the frame is re-encoded from the oriented bitmap
+// so the file needs no EXIF rotation to read right, and at the highest quality
+// the client chose. A spine's publisher line is 10 px tall. A cropped photo's
+// canvas is encoded as it is (once, here); a bitmap is copied first, and the
+// copy is released.
 function gateJpeg(bmp) {
-  const c = document.createElement('canvas');
-  c.width = bmp.width; c.height = bmp.height;
-  c.getContext('2d').drawImage(bmp, 0, 0);
+  const own = !(typeof HTMLCanvasElement !== 'undefined' && bmp instanceof HTMLCanvasElement);
+  let c = bmp;
+  if (own) {
+    c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    c.getContext('2d').drawImage(bmp, 0, 0);
+  }
   return new Promise((res, rej) =>
-    c.toBlob(b => b ? res(b) : rej(new Error('JPEG encode failed')), 'image/jpeg', settings.quality || 0.95));
+    c.toBlob(b => { if (own) releaseCanvas(c); b ? res(b) : rej(new Error('JPEG encode failed')); }, 'image/jpeg', settings.quality || 0.95));
 }
 async function keepFrame() {
   if (!gate.bmp) return;
@@ -945,11 +2359,23 @@ async function keepFrame() {
   btn.disabled = true;
   btn.textContent = 'Saving…';
   await new Promise(r => setTimeout(r, 40));
+  // A photo from the crop screen carries its example, made at Save from the original.
+  const pend = gateFromCrop() ? review.pending : null;
+  const t0 = performance.now();
   try {
     const bmp = gate.bmp;
     const blob = await gateJpeg(bmp);
-    if (capT.kind === 'book') return await keepBookShot(capT.shot, bmp, blob);
-    if (capT.kind === 'full') return await keepFullShot(capT.shot, bmp, blob);
+    if (capT.kind === 'trial') return await keepTrialShot(capT.shot, bmp, blob, pend, t0);
+    if (capT.kind === 'book' || capT.kind === 'full') {
+      const kind = capT.kind, shot = capT.shot, bk = curBook, crop = pend ? pend.crop : null;
+      if (kind === 'book') await keepBookShot(shot, bmp, blob, crop);
+      else await keepFullShot(shot, bmp, blob, crop);
+      // Its training example, once the photo itself is stored; then the original goes.
+      const banked = pend ? await logCrop(pend, kind, shot, bk) : false;
+      freeReview();
+      if (banked) await cropNoteOnce();
+      return;
+    }
     const photos = await photosFor(curShelf.id);
     const n = curFrame || (photos.length ? photos[photos.length - 1].n + 1 : 1);
     await dbPut('photos', { shelfId: curShelf.id, n, blob, w: bmp.width, h: bmp.height, when: Date.now() });
@@ -959,7 +2385,8 @@ async function keepFrame() {
     toast(`Frame ${n} saved ✓`);
   } catch (e) {
     console.error(e);
-    toast('Could not save the photo on this phone. Is its storage full?', 4000);
+    if (capT.kind === 'trial') cropTrialFail('Keep', e);
+    toast(pend ? CROP_WORDS.keepFailed : 'Could not save the photo on this phone. Is its storage full?', 4000);
   } finally {
     btn.disabled = false;
     btn.textContent = '✓ Yes — keep';
@@ -977,6 +2404,9 @@ function openViewer(p) {
   // A photo sent at spot-check is shown, never re-shot or deleted here (locked).
   $('#btnVRetake').classList.toggle('hidden', !!p.locked);
   $('#btnVDelete').classList.toggle('hidden', !!p.locked);
+  // A cropped photo replaced the original, so its edges are changed only by taking it again.
+  $('#viewerCropNote').textContent = CROP_WORDS.viewer;
+  $('#viewerCropNote').classList.toggle('hidden', !p.crop || !!p.locked);
   if (p.shotId && curBook && curBook.full) {
     const s = fullShotDef(curBook.template, p.shotId) || { label: '' };
     const name = FULL_NAMES[p.shotId] || s.label;
@@ -1013,12 +2443,14 @@ $('#btnVDelete').onclick = async () => {
     if (!fullEditable(curBook)) return toast('Wait for the upload to finish');
     if (!confirm('Delete this photo?')) return;
     await dbDel('shots', [curBook.id, viewPhoto.shotId]);
+    await dbDel('kv', CROP_KEYS + curBook.id + ':' + viewPhoto.shotId);   // its waiting example goes with it
     await fullChanged(curBook);
     return backToFull();
   }
   if (viewPhoto.shotId) {
     if (!confirm('Delete this photo?')) return;
     await dbDel('shots', [curBook.id, viewPhoto.shotId]);
+    await dbDel('kv', CROP_KEYS + curBook.id + ':' + viewPhoto.shotId);   // its waiting example goes with it
     await bookChanged(curBook);
     return backToBook();
   }
@@ -1491,13 +2923,26 @@ async function prepareUpload(st) {
 async function pumpUploads() {
   if (uploadPumpRunning) return;
   uploadPumpRunning = true;
+  let cropPasses = 0;   // each pass sends, sets aside or tidies one: never more than this in a run
   try {
     for (;;) {
       // A paused whole book waits for her tap (Upload on its checklist, or the home
       // screen's sign-in): she may be changing it, and a run started on its own would
       // send what it read before her change.
-      const queue = (await uploadQueue()).filter(s => !(s.full && s.upload.state === 'paused'));
-      if (!queue.length) break;
+      const all = await uploadQueue();
+      const queue = all.filter(s => !(s.full && s.upload.state === 'paused'));
+      if (!queue.length) {
+        // Crop training examples are the lowest priority: one pair a pass, and only while no
+        // shelf or book is queued, uploading or paused (a paused whole book waits for her tap,
+        // and no pair goes before it). Each pass reads the queue again, so a book queued while
+        // a pair was going up goes next. A pair that cannot go now simply waits.
+        if (all.length) break;
+        if (++cropPasses <= 2 * CROP_CAP + 50 && await syncCropLogs()) continue;
+        // A pass that sent nothing may still have taken a while in Drive: a book queued
+        // meanwhile (its own pump call found this one running) goes now, not at the next start.
+        if ((await uploadQueue()).some(s => !(s.full && s.upload.state === 'paused'))) continue;
+        break;
+      }
       if (!tokenFresh()) {
         for (const sh of queue) if (sh.upload.state !== 'paused') await setUpload(sh, { state: 'paused' });
         refreshUploadCards();
@@ -1580,18 +3025,32 @@ async function uploadShelf(sh) {
  * or a second phone, still files the answer where the curator reads. */
 const DRIVE_FILES = 'https://www.googleapis.com/drive/v3/files/';
 const SHELF_GONE = 'Could not open this shelf’s folder. Reopen the app, sign in with your shelves’ Google account, or tell your curator';
+// Every failure here has the one message SHELF_GONE; `gone` says which it was, for the crop
+// examples (which keep theirs unless the folder is gone for good): 'nokey' (no folder id),
+// 'missing' (Drive: 404), 'denied' (Drive: 403, with its status and body), 'bin', 'moved'.
 async function requestRootFolder(key) {
+  const gone = (how, cause) => {
+    const e = new Error(SHELF_GONE);
+    e.gone = how;
+    if (cause) { e.status = cause.status; e.body = cause.body; }
+    return e;
+  };
   const get = async (id, fields) => {
     try { return await drive(DRIVE_FILES + encodeURIComponent(id) + '?fields=' + fields); }
-    catch (e) { if (/Drive error (403|404)/.test(String(e.message))) throw new Error(SHELF_GONE); throw e; }
+    catch (e) {
+      const m = /Drive error (403|404)/.exec(String(e.message));
+      if (m) throw gone(m[1] === '404' ? 'missing' : 'denied', e);
+      throw e;
+    }
   };
-  if (!REQ_KEY_RE.test(String(key || ''))) throw new Error(SHELF_GONE);
+  if (!REQ_KEY_RE.test(String(key || ''))) throw gone('nokey');
   const sf = await get(key, 'id,parents,trashed');
-  if (!sf || sf.trashed || !Array.isArray(sf.parents) || sf.parents.length !== 1) throw new Error(SHELF_GONE);
+  if (!sf || sf.trashed || !Array.isArray(sf.parents) || sf.parents.length !== 1) throw gone(sf && sf.trashed ? 'bin' : 'moved');
   const sv = await get(sf.parents[0], 'id,name,parents,trashed');
-  if (!sv || sv.trashed || sv.name !== SHELVES_FOLDER || !Array.isArray(sv.parents) || sv.parents.length !== 1) throw new Error(SHELF_GONE);
+  if (!sv || sv.trashed || sv.name !== SHELVES_FOLDER || !Array.isArray(sv.parents) || sv.parents.length !== 1) throw gone(sv && sv.trashed ? 'bin' : 'moved');
   const root = await get(sv.parents[0], 'id,name,trashed');
-  if (!root || !root.id || root.trashed) throw new Error(SHELF_GONE);
+  if (!root || !root.id || root.trashed) throw gone(root && root.trashed ? 'bin' : 'moved');
+  rootReachedWith = tokenInfo.token;
   return { id: root.id, name: root.name };
 }
 function bookFileBase(bk) { return `${sanitize(bk.author || '') || 'Unknown'} - ${sanitize(bk.title || '') || 'Untitled'}`; }
@@ -1619,7 +3078,7 @@ async function uploadBook(bk) {
     const base = bookFileBase(bk);
     const files = BOOK_SHOTS.map(s => {
       const x = shots.find(y => y.shotId === s.id);
-      return { shot: s.id, name: `${base} - ${s.id} ${s.name}.jpg`, mime: 'image/jpeg', blob: x.blob, w: x.w, h: x.h };
+      return { shot: s.id, name: `${base} - ${s.id} ${s.name}.jpg`, mime: 'image/jpeg', blob: x.blob, w: x.w, h: x.h, ...cropField(x.crop) };
     });
     const words = shots.find(y => y.shotId === BOOK_WORDS.id && y.text);
     if (words) files.push({ shot: BOOK_WORDS.id, name: `${base} - ${BOOK_WORDS.id} ${BOOK_WORDS.name}.txt`, mime: 'text/plain',
@@ -1675,7 +3134,7 @@ async function writeBookManifest(folder, bk, files) {
     requestBookId: bk.requestBookId || '',
     shelfRef: { shelfId: r.shelfId || '', shelfFolderId: r.shelfFolderId || '', file: r.file || '', box: r.box || null, where: r.where || '' },
     note: bk.note || '',
-    photos: files.filter(f => !f.text).map(f => ({ shot: f.shot, file: f.name, w: f.w, h: f.h, required: true })),
+    photos: files.filter(f => !f.text).map(f => ({ shot: f.shot, file: f.name, w: f.w, h: f.h, required: true, ...cropField(f.crop) })),
     texts: files.filter(f => f.text).map(f => ({ shot: f.shot, file: f.name })),
     operator: bk.operator || settings.operator || '',
     startedAt: new Date(started).toISOString(),
@@ -2165,6 +3624,7 @@ function backToBook() {
   stopCam();
   stopLevel();
   freeGate();
+  freeReview();
   stopVoice();
   if (!curBook) return openRequests();
   show('scr-book', { title: 'Book', back: async () => { await leaveBook(); openRequest(curBook.requestId); } });
@@ -2216,9 +3676,9 @@ function paintBookUpload(bk, ready) {
   $('#bkStatus').textContent = bk.upload && bk.upload.state === 'failed' ? uploadLabel(bk)
     : !ready ? 'Both photos are needed before this can be sent.' : '';
 }
-async function keepBookShot(shotId, bmp, blob) {
+async function keepBookShot(shotId, bmp, blob, crop) {
   const bk = curBook;
-  await dbPut('shots', { bookId: bk.id, shotId, blob, w: bmp.width, h: bmp.height, when: Date.now() });
+  await dbPut('shots', { bookId: bk.id, shotId, blob, w: bmp.width, h: bmp.height, when: Date.now(), ...cropField(crop) });
   await bookChanged(bk);
   backToBook();
   toast(`${shotId} saved ✓`);
@@ -2274,6 +3734,7 @@ async function deleteBook(id, then) {
   if (!confirm(ask)) return;
   stopVoice();
   for (const s of await shotsFor(id)) await dbDel('shots', [id, s.shotId]);
+  await cropDelete(CROP_KEYS + id + ':');   // its crop examples not yet sent
   await dbDel('books', id);
   // answered keeps the request's folder: a new record for it goes back there.
   await setAnswered(bk.requestId, { ready: false });
@@ -2640,6 +4101,7 @@ function backToFull() {
   stopCam();
   stopLevel();
   freeGate();
+  freeReview();
   stopVoice();
   if (!curBook || !curBook.full) return openRequests();
   show('scr-full', { title: 'Book', back: async () => { await leaveFull(); openRequest(curBook.requestId); } });
@@ -2913,6 +4375,7 @@ async function openFullCamera(shotId) {
   capT = { kind: 'full', shot: shotId };
   torchWant = !!s.torch;
   freeGate();
+  freeReview();
   stopLevel();
   show('scr-camera', { title: bk.title || 'Book', back: backToFull });
   $('#camLabel').textContent = `${s.id} ${FULL_NAMES[s.id] || s.label}`;
@@ -2943,17 +4406,17 @@ function makeThumb(bmp, max = 200) {
   const g = c.getContext('2d');
   g.imageSmoothingQuality = 'high';
   g.drawImage(bmp, 0, 0, c.width, c.height);
-  return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('thumbnail')), 'image/jpeg', 0.8));
+  return new Promise((res, rej) => c.toBlob(b => { releaseCanvas(c); b ? res(b) : rej(new Error('thumbnail')); }, 'image/jpeg', 0.8));
 }
 // A frame kept is never thrown away. Should an upload of this book be running all the
 // same (the camera opens only on a book that is not going up, and a paused one waits
 // for her tap), the change counts a new revision and that upload goes round again
 // before it says Sent.
-async function keepFullShot(shotId, bmp, blob) {
+async function keepFullShot(shotId, bmp, blob, crop) {
   const bk = curBook;
   let thumb = null;
   try { thumb = await makeThumb(bmp); } catch (e) { thumb = null; }
-  await dbPut('shots', { bookId: bk.id, shotId, blob, thumb, w: bmp.width, h: bmp.height, when: Date.now() });
+  await dbPut('shots', { bookId: bk.id, shotId, blob, thumb, w: bmp.width, h: bmp.height, when: Date.now(), ...cropField(crop) });
   if (bk.skipped && bk.skipped[shotId]) delete bk.skipped[shotId];
   await fullChanged(bk);
   backToFull();
@@ -3050,7 +4513,7 @@ async function driveMove(fileId, from, to) {
 // The copyright words file. When the spot-check record already lists a words file of
 // its own (shot 13), this capture's words go into "... - 13 Copyright Verbatim (whole
 // book).txt", so the spot-check's file is never written over and book.spot.json keeps
-// pointing at the words the spot-check filing read; otherwise the one name of C1. The
+// pointing at the words the spot-check filing read; otherwise its one name (FULL_NAMES). The
 // sheet reads the words from whichever file book.json's texts entry names.
 function fullTextName(words, spotM) {
   const spot13 = !!spotM && Array.isArray(spotM.texts) &&
@@ -3074,7 +4537,7 @@ function fullFiles(bk, shots, words, spotM) {
     if (!x.blob || !FULL_NAMES[x.shotId]) continue;
     const s = inT[x.shotId];
     out.push({ shot: x.shotId, name: `${words} - ${x.shotId} ${FULL_NAMES[x.shotId]}.jpg`, mime: 'image/jpeg', blob: x.blob,
-      w: x.w, h: x.h, when: x.when, required: !!(s && s.req), check: x.shotId === '27' });
+      w: x.w, h: x.h, when: x.when, required: !!(s && s.req), check: x.shotId === '27', ...cropField(x.crop) });
   }
   return out;
 }
@@ -3245,8 +4708,9 @@ async function writeFullManifest(folder, bk, files, chk) {
   const was = Array.isArray(chk.book.m.photos) ? chk.book.m.photos : [];
   const photos = FULL_KEPT.map(id => {
     const p = was.find(x => x && x.shot === id) || {};
-    return { shot: id, file: chk.kept[id].file, w: p.w == null ? null : p.w, h: p.h == null ? null : p.h, required: true, kept: true, check: false };
-  }).concat(files.filter(f => !f.text).map(f => ({ shot: f.shot, file: f.name, w: f.w, h: f.h, required: f.required, kept: false, check: f.check })))
+    // A kept photo keeps the crop the spot-check's book.json gave it, if any.
+    return { shot: id, file: chk.kept[id].file, w: p.w == null ? null : p.w, h: p.h == null ? null : p.h, required: true, kept: true, check: false, ...cropField(p.crop) };
+  }).concat(files.filter(f => !f.text).map(f => ({ shot: f.shot, file: f.name, w: f.w, h: f.h, required: f.required, kept: false, check: f.check, ...cropField(f.crop) })))
     .sort((a, b) => a.shot.localeCompare(b.shot));
   const sent = new Set(files.map(f => f.shot));
   const sk = bk.skipped || {};
@@ -3340,8 +4804,37 @@ function openSettings() {
   $('#inRequestsUrl').placeholder = BUILTIN.requestsUrl || 'https://script.google.com/macros/s/…/exec';
   $('#reqTestNote').textContent = '';
   renderLinkNote();
+  // Book photos: shown only once the crop step is on. The line under Photo output says what
+  // the photos are, true either way.
+  $('#cropSettings').classList.toggle('hidden', !CROP_ON);
+  if (CROP_ON) cropLinkText($('#photoSizeHint'), CROP_WORDS.sizeHint); else $('#photoSizeHint').textContent = PHOTO_SIZE_HINT;
+  if (CROP_ON) {
+    $('#cropHead').textContent = CROP_WORDS.settingsHead;
+    $('#cropLogLabel').textContent = CROP_WORDS.logLabel;
+    $('#cropLogHelp').textContent = CROP_WORDS.logHelp;
+    cropLinkText($('#cropPrivacy'), CROP_WORDS.privacyMore);
+    $('#inLogCrops').checked = settings.logCrops !== false;
+    $('#cropStat').textContent = '';
+    updateCropStat();
+  }
   show('scr-settings', { title: 'Settings', back: goHome });
 }
+const PHOTO_SIZE_HINT = $('#photoSizeHint').textContent;
+// Text whose words CROP_WORDS.privacyLink become a link to the privacy page's part on cropping,
+// opened outside the app (a phone's installed app has no address bar to come back with).
+function cropLinkText(el, text) {
+  const w = CROP_WORDS.privacyLink, i = text.indexOf(w);
+  el.textContent = '';
+  if (i < 0) { el.textContent = text; return; }
+  const a = document.createElement('a');
+  a.href = CROP_WORDS.privacyHref;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = w;
+  el.append(text.slice(0, i), a, text.slice(i + w.length));
+}
+// "Help improve the cropping" is saved by Save settings, like every other box on this screen:
+// ticking or unticking it alone changes nothing (no handler on the box itself).
 function renderLinkNote() {
   $('#linkNote').textContent = settings.driveFolderId
     ? '🔗 Linked to a folder that already exists in Drive.'
@@ -3401,7 +4894,13 @@ $('#btnSaveSettings').onclick = async () => {
   if (rq !== settings.requestsUrl) reqLastTry = 0;
   settings.requestsUrl = rq;
   tokenInfo = tokenInfo.token && settings.clientId === cred('clientId') ? tokenInfo : { token: null, exp: 0 };
+  // Help improve the cropping, read only while its section is shown (the crop step on). Saved
+  // off, it also deletes from the phone the examples not yet sent.
+  const cropBox = CROP_ON && !$('#cropSettings').classList.contains('hidden');
+  const cropOff = cropBox && !$('#inLogCrops').checked;
+  if (cropBox) settings.logCrops = !cropOff;
   await saveSettings();
+  if (cropOff) await cropDelete(CROP_KEYS);
   toast('Settings saved');
   goHome();
 };
@@ -3420,7 +4919,7 @@ $('#btnWipe').onclick = async () => {
     if (Object.keys(held).length) await dbPut('kv', held, 'heldIds');
     if (Object.keys(answered).length) await dbPut('kv', answered, 'answered');
   }
-  Object.assign(settings, { clientId: '', apiKey: '', projectNumber: '', shareWith: '', operator: '', quality: 0.95, driveFolder: 'Books Curator', driveFolderId: '', requestsUrl: '' });
+  Object.assign(settings, { clientId: '', apiKey: '', projectNumber: '', shareWith: '', operator: '', quality: 0.95, driveFolder: 'Books Curator', driveFolderId: '', requestsUrl: '', logCrops: true });
   reqLastTry = 0;
   toast('Deleted. Before your next upload, ask your curator what to type in ⚙ Settings.', 4500);
   goHome();
@@ -3517,6 +5016,7 @@ async function showVersion() {
   initServiceWorker();
   showVersion();
   maybeCoachIosInstall().catch(() => {});
+  cropTrialStart().catch(e => console.error('crop test sweep', e));
   await seedHeldIds();   // before the first requests check
   await goHome();
   pumpUploads();   // an interrupted queue: no token yet, so this marks it paused and shows the sign-in

@@ -7,11 +7,12 @@
 # Whenever shipped app code is committed, re-stamp sw.js's cache name (and
 # app.js's APP_VERSION to match) so installed phones are told there's an update.
 # Forgetting that bump by hand was how phones ended up a version behind.
+# detect.js (the crop step's geometry) is shipped app code too: it is in sw.js ASSETS.
 
 changed=$(git diff --cached --name-only)
 
 case "$changed" in
-  *index.html*|*app.js*)
+  *index.html*|*app.js*|*detect.js*)
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./bump-version.ps1 || exit 1
     git add sw.js app.js
     ;;
