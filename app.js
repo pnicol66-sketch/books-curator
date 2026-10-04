@@ -6,7 +6,7 @@
  * (IndexedDB store, camera, background Drive upload queue, folder sharing,
  * update bar, dictation) is copied in with the same function names so a diff
  * between the two apps stays readable. The vinyl crop screen is copied in for
- * book photos (switched off by CROP_ON until it ships); shelf frames are never
+ * book photos (behind the CROP_ON switch); shelf frames are never
  * cropped, and matrix dictation is not here. Shelves: one labelled photo (or a few overlapping
  * frames) per shelf, checked for legibility, uploaded to the client's own Drive
  * under Books Curator/_Shelves/<label>/. Request answers: the curator asks for
@@ -17,7 +17,7 @@
 
 /* Build stamp — rewritten by bump-version.ps1 (and the pre-commit hook) so it
    always matches the service worker's cache name. Shown in Settings. */
-const APP_VERSION = '20261003-220522';
+const APP_VERSION = '20261004-041710';
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -44,8 +44,8 @@ const SHELF_GATE = 'Drag the loupe over the smallest spine. Can you read it?';
 const BOOK_SHOTS = [
   { id: '01', name: 'Jacket Front', label: 'Front of the jacket (or the cover if there is no jacket)',
     tip: '📸 The whole front, square on · flash off', gate: 'Drag the loupe over the title. Can you read it?' },
-  { id: '12', name: 'Copyright Page', label: 'Copyright page: open the book flat at it, the whole page, square on',
-    tip: '📸 Open the book flat at the copyright page · the whole page, square on · flash off',
+  { id: '12', name: 'Copyright Page', label: 'Copyright page: open the book at it, the whole page, square on',
+    tip: '📸 Open the book as flat as it goes, without forcing it, at the copyright page · the whole page, square on · flash off',
     gate: 'Drag the loupe over the smallest print. Can you read it?' },
 ];
 const BOOK_WORDS = { id: '13', name: 'Copyright Verbatim' };
@@ -171,9 +171,9 @@ const FULL_TEMPLATES = {
         { id: '08', req: true, label: 'Back flap, unfolded', gate: 'Can you read the small print?',
           tip: '📸 Unfold the back flap flat · the whole flap' },
       ] },
-      { head: 'Book open flat', shots: [
+      { head: 'Book open', shots: [
         { id: '11', req: true, label: 'Title page, the whole page', gate: 'Can you read the smallest print?',
-          tip: '📸 Open flat at the title page · the whole page, square on' },
+          tip: '📸 Open the book as flat as it goes, without forcing it, at the title page · the whole page, square on' },
         { id: '12', kept: true, label: 'Copyright page' },
         { id: '27', req: true, check: true, label: 'Copyright page again, the whole page', gate: 'Can you read the number line?',
           tip: '📸 The copyright page again · the whole page, square on · flash off' },
@@ -211,9 +211,9 @@ const FULL_TEMPLATES = {
         { id: '16', req: true, label: 'Page edges: top and side together, book closed', gate: 'Can you see both edges?',
           tip: '📸 Book closed · the top and side edges together, at an angle' },
       ] },
-      { head: 'Book open flat', shots: [
+      { head: 'Book open', shots: [
         { id: '11', req: true, label: 'Title page, the whole page', gate: 'Can you read the smallest print?',
-          tip: '📸 Open flat at the title page · the whole page, square on' },
+          tip: '📸 Open the book as flat as it goes, without forcing it, at the title page · the whole page, square on' },
         { id: '12', kept: true, label: 'Copyright page' },
         { id: '27', req: true, check: true, label: 'Copyright page again, the whole page', gate: 'Can you read the number line?',
           tip: '📸 The copyright page again · the whole page, square on · flash off' },
@@ -264,12 +264,12 @@ function fullRequiredCount(t) { return fullShotList(t).filter(s => s.req).length
  * sheet copies every example from there into the central crop training library, which is the
  * only place training reads. Nothing is learned on the phone.
  *
- * The whole step is switched off (CROP_ON false) until it ships together with the privacy
- * page's words; while it is off the app behaves as it did before it: no crop screen, no
- * example kept, no Settings section, nothing uploaded. The one exception is the session-only
- * crop test opened by ?crop=1 (a throwaway book that nothing uploads, deleted after).
+ * The whole step is behind one switch, CROP_ON, on since it shipped with the privacy page's
+ * words. Switched off, the app behaves as it did before the step: no crop screen, no example
+ * kept, no Settings section, nothing uploaded. The one exception is the session-only crop test
+ * opened by ?crop=1 (a throwaway book that nothing uploads, deleted after).
  * Every word the crop step shows is in CROP_WORDS. */
-let CROP_ON = false;                 // the switch; false until it ships (a test may turn it on in the page)
+let CROP_ON = true;                  // the switch: on (false puts the app back as before the step; a test may change it in the page)
 const SPOT_CROP_ON = true;           // 01 and 12 crop at a new spot-check; only a rollback lever
 // The crop kind per shot number, the same in both templates: 4 points or 6; any other shot
 // and every shelf frame: none. 01 and 12 apply only at a spot-check.
@@ -290,7 +290,8 @@ const CROP_WORDS = {
     '11': 'page', '12': 'page', '14': 'page', '27': 'page',
   },
   tap: what => `Tap the 4 corners of the ${what}, in any order.`,
-  missing: 'If a corner is missing, tap where it would be.',
+  missing: 'If a corner is missing, tap where it would be.',   // on every cropped photo, after the tap line
+  outside: 'If a corner is outside the photo, tap at the edge of the photo there.',   // and this after it, on every cropped photo
   dots: {
     page: 'If the page curves down into the middle of the book, drag a round dot to where the curve starts; the other dot follows. If it lies flat, leave them. Then Save.',
     flap: 'If the flap curves where it folds, drag a round dot to where the flap starts to lift; the other dot follows. If it lies flat, leave them. Then Save.',
@@ -317,18 +318,18 @@ const CROP_WORDS = {
   settingsHead: 'Book photos',
   logLabel: 'Help improve the cropping',
   // What is kept, said the same way here, in the note and on the privacy page: a copy of every
-  // photo kept from the crop screen (cropped, or kept whole with Whole photo), and its small file.
-  logHelp: 'For every book photo you keep from the crop screen, cropped or kept whole with Whole photo, a smaller copy as you took it goes to the folder _Crop examples in your upload folder after that book has uploaded, and Books Curator copies it from there into its own training folder. The copy shows the book as you photographed it, including its title and anything written in it. With it goes a small file of the edges you set, which photograph it was, which way up it goes, a code that groups one book\'s photos without naming it, the app\'s version and the date and time. Nothing else is added: no names, titles or notes. Books Curator uses them only to improve the cropping. A cropped photo keeps a thin margin beyond the edges you set (on a page or flap, at its top and bottom). Turning this off and tapping Save settings deletes from the phone any copies not yet sent.',
+  // photo kept from the crop screen (cropped or kept whole), and its small file.
+  logHelp: 'For every book photo you keep from the crop screen, cropped or kept whole, a smaller copy as you took it goes to the folder _Crop examples in your upload folder in Google Drive (the one set in Settings, Drive folder for uploads) after that book has uploaded, and Books Curator copies it from there into its own training folder. Books Curator\'s training folder gathers the copies from everyone who uses the app. The copy shows the book as you photographed it, including its title and anything written in it. With it goes a small file of the edges you set, which photograph it was, which way up it goes, a code that groups one book\'s photos without naming it, the app\'s version and the date and time. Nothing else is added: no names, titles or notes. Books Curator uses them only to improve the cropping. A cropped photo keeps a thin margin beyond the edges you set (on a page or flap, never on the side toward the middle of the book). Turning this off and tapping Save settings deletes from the phone any copies not yet sent.',
   stat: (kept, sent, waiting) => `Crop examples: ${kept} kept · ${sent} sent · ${waiting} waiting for your next upload.`,
   statFull: 'No more are kept until these have been sent.',
-  sizeHint: "Book photos are cropped to the edges you set, with a thin margin beyond them (on a page or flap, at its top and bottom), and keep the camera's detail up to about 16 megapixels. While Help improve the cropping is on, a smaller copy as you took it is also kept (see the privacy page). Shelf photos are saved whole.",
+  sizeHint: "Book photos are cropped to the edges you set, with a thin margin beyond them (on a page or flap, never on the side toward the middle of the book), and keep the camera's detail up to about 16 megapixels. While Help improve the cropping is on, a smaller copy as you took it is also kept (see the privacy page). Shelf photos are saved whole.",
   // The words in sizeHint and privacyMore made a link to the privacy page's part on cropping.
   privacyLink: 'the privacy page',
   privacyHref: 'privacy.html#cropping',
   privacyMore: 'More about these copies, and how to have them deleted, is on the privacy page.',
   // The note shown once, at the first photo kept from the crop screen (before anything is sent).
   // That photo may be cropped or kept whole, so the note says what happens to both.
-  note: 'A smaller copy of each book photo you keep from the crop screen, cropped or whole, goes to the folder _Crop examples in your Drive folder after its book uploads, and Books Curator copies it from there into its own training folder to improve the cropping. It shows the book as you photographed it. With it goes a small file of the edges you set, which photograph it was, which way up it goes, a code that groups one book\'s photos without naming it, the app\'s version and the date and time. A cropped photo keeps a thin margin beyond the edges you set (on a page or flap, at its top and bottom). You can turn this off now, or later in Settings, under Book photos.',
+  note: 'A smaller copy of each book photo you keep from the crop screen, cropped or kept whole, goes to the folder _Crop examples in your upload folder in Google Drive (the one set in Settings, Drive folder for uploads) after that book has uploaded, and Books Curator copies it from there into its own training folder to improve the cropping. It shows the book as you photographed it, including its title, anything written in it and anything around it, such as your hand. With it goes a small file of the edges you set, which photograph it was, which way up it goes, a code that groups one book\'s photos without naming it, the app\'s version and the date and time. Nothing else is added. A cropped photo keeps a thin margin beyond the edges you set. You can turn this off now, or later in Settings, under Book photos. Turn it off also deletes the copy not yet sent.',
   noteOk: 'OK',
   noteOff: 'Turn it off',
   // The crop test (?crop=1, for the curator; nothing is sent).
@@ -925,7 +926,14 @@ function capTemplate() {
 function capShotDef() {
   return capT.kind === 'book' ? BOOK_SHOTS.find(x => x.id === capT.shot)
     : capT.kind === 'full' && curBook ? fullShotDef(curBook.template, capT.shot)
-    : capT.kind === 'trial' ? fullShotDef('hc', capT.shot) || BOOK_SHOTS.find(x => x.id === capT.shot) : null;
+    : capT.kind === 'trial' ? trialShotDef(capT.shot) : null;
+}
+// A shot in the crop test, with its tip and its "Can you read it?" question: 01 and 12 as a
+// spot-check asks for them (the whole-book list sends them earlier and has no question for them),
+// every other shot as the hardcover list does.
+function trialShotDef(shot) {
+  return (FULL_KEPT.indexOf(shot) >= 0 && BOOK_SHOTS.find(x => x.id === shot)) || fullShotDef('hc', shot) ||
+    BOOK_SHOTS.find(x => x.id === shot) || null;
 }
 function shotName(id) { return FULL_NAMES[id] || (BOOK_SHOTS.find(x => x.id === id) || {}).name || ''; }
 function reviewTitle() { return `${review.shot} ${shotName(review.shot)}`; }
@@ -1073,7 +1081,7 @@ function updateTapPrompt() {
   const v = p ? Detect.validShape(p, review.bmp.width, review.bmp.height) : { ok: true };
   let msg;
   if (review.busy) msg = CROP_WORDS.straightening;
-  else if (tapping) msg = CROP_WORDS.tap(cropWhat()) + (review.kind === 6 ? ' ' + CROP_WORDS.missing : '');
+  else if (tapping) msg = CROP_WORDS.tap(cropWhat()) + ' ' + CROP_WORDS.missing + ' ' + CROP_WORDS.outside;
   else if (!v.ok) msg = cropInvalidWords(v.why);
   else if (review.kind === 6 && !midMoved()) msg = CROP_WORDS.dots[cropWhat() === 'flap' ? 'flap' : 'page'];
   else msg = review.kind === 6 ? CROP_WORDS.adjust6 : CROP_WORDS.adjust4;
@@ -1843,9 +1851,10 @@ async function cropSaltOf() {
   return s;
 }
 // Groups one copy's photos (its spot-check and its whole book share the request's Book ID)
-// without naming it: the first 16 hex of SHA-256 of the salt and the Book ID.
-async function cropGroup(id) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode((await cropSaltOf()) + String(id)));
+// without naming it: the first 16 hex of SHA-256 of the salt and the Book ID. The crop test
+// passes its own throwaway salt, so it never writes the phone's.
+async function cropGroup(id, salt) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode((salt || await cropSaltOf()) + String(id)));
   return Array.from(new Uint8Array(buf).slice(0, 8), b => b.toString(16).padStart(2, '0')).join('');
 }
 // Bank one example for a kept photo. Never fails the Keep; returns whether it was banked.
@@ -1854,7 +1863,8 @@ async function logCrop(pend, kind, shot, bk) {
     if (!pend || !pend.small) return false;
     const trial = kind === 'trial';
     if (!trial && !(CROP_ON && settings.logCrops !== false)) return false;
-    const bookId = trial ? (cropTrial && cropTrial.bookId) : bk && bk.id;
+    const t = trial ? cropTrial : null;
+    const bookId = trial ? (t && t.bookId) : bk && bk.id;
     if (!bookId) return false;
     const key = CROP_KEYS + bookId + ':' + shot;
     // At the cap no more are kept (a re-take still replaces its own); none is ever dropped.
@@ -1866,7 +1876,8 @@ async function logCrop(pend, kind, shot, bk) {
       when: new Date().toISOString(),
       app: APP_VERSION,
       shot: { id: shot, template: kind === 'book' ? 'spot' : trial ? 'hc' : (bk.template || ''), points: CROP_POINTS[shot] || 0 },
-      group: await cropGroup(trial ? bookId : (bk.requestBookId || bk.id)),
+      // The crop test: a salt of its own, held in memory for the test only (it leaves no cropSalt).
+      group: trial ? await cropGroup(bookId, t.salt || (t.salt = cropRandom(32))) : await cropGroup(bk.requestBookId || bk.id),
       image: { w: sm.w, h: sm.h },
       rot: pend.rot || 0,
       shape: six ? 'six' : 'quad',
@@ -1880,7 +1891,7 @@ async function logCrop(pend, kind, shot, bk) {
     return true;
   } catch (e) { console.error('crop log', e); return false; }
 }
-// The one-time note at the first photo kept from the crop screen (cropped or whole): she sees
+// The one-time note at the first photo kept from the crop screen (cropped or kept whole): she sees
 // it, and its Turn it off, before anything is sent (an example leaves only with a later upload,
 // after its book). Its Turn it off acts at once; the Settings box waits for Save settings.
 async function cropNoteOnce() {
@@ -2055,7 +2066,7 @@ async function syncCropLogs() {
 }
 
 /* ---------- the crop test (?crop=1) ----------
- * For the curator, on the phone it is meant for, before the crop step is switched on: the
+ * For the curator, on the phone it is meant for: the
  * camera, the crop screen, the check and the whole Keep path (the JPEG, the thumbnail, the
  * small copy and its `kv` write) on a throwaway book that nothing uploads. Each photo is timed
  * and then deleted with its example; nothing is stored once the test ends. Session only: the
@@ -2066,7 +2077,16 @@ const TRIAL_SHOTS = ['27', '05', '11', '03', '06', '09', '08', '10', '14', '20',
 $('#btnCropTest').onclick = () => openCropTrial();
 function openCropTrial() {
   if (!cropTrial) cropTrial = { bookId: CROP_TRIAL_ID + Date.now().toString(36), n: 0, rows: [] };
+  cropTrialHold(true);
   backToTrial();
+}
+// While the test is open its timings live only in this page: a pull-down may not reload it
+// (overscroll-behavior on the root, html.croptest), and the "A new version is ready." bar waits
+// until the test ends (its Update reloads the page). Both are put back when it ends.
+function cropTrialHold(on) {
+  document.documentElement.classList.toggle('croptest', !!on);
+  if (on) $('#updateBar').classList.add('hidden');
+  else if (updateReady) $('#updateBar').classList.remove('hidden');
 }
 function backToTrial() {
   stopCam();
@@ -2101,7 +2121,7 @@ function backToTrial() {
 async function openTrialCamera() {
   if (!cropTrial) return goHome();
   const shot = TRIAL_SHOTS[cropTrial.n % TRIAL_SHOTS.length];
-  const s = fullShotDef('hc', shot) || BOOK_SHOTS.find(x => x.id === shot) || {};
+  const s = trialShotDef(shot) || {};
   capT = { kind: 'trial', shot };
   freeGate();
   freeReview();
@@ -2144,6 +2164,7 @@ async function cropTrialClean(bookId) {
 async function endCropTrial() {
   const t = cropTrial;
   cropTrial = null;
+  cropTrialHold(false);
   if (t) await cropTrialSweep();   // its photos and examples, and the mark
   goHome();
 }
@@ -2913,7 +2934,7 @@ async function prepareUpload(st) {
   if (!cred('clientId')) throw new Error('This build has no Google Client ID yet — add one in ⚙ Settings');
   st('Signing in to Google…');
   await getToken();
-  st('Finding your Drive folder…');
+  st('Finding your upload folder…');
   const id = await resolveRootFolder();
   const name = settings.driveFolder || 'Books Curator';
   rootCache = { id, name };
@@ -4974,6 +4995,13 @@ $('#btnUpdate').onclick = () => {
   if (swReg && swReg.waiting) swReg.waiting.postMessage('SKIP_WAITING');
   else location.reload();
 };
+// A new build is installed and waiting: the bar offers it, except while the crop test is open
+// (it shows when the test ends).
+let updateReady = false;
+function showUpdateBar() {
+  updateReady = true;
+  if (!cropTrial) $('#updateBar').classList.remove('hidden');
+}
 async function initServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   if (location.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(location.hostname)) return;
@@ -4989,7 +5017,7 @@ async function initServiceWorker() {
   });
   try { swReg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }); }
   catch (e) { return; }
-  const announce = () => { if (navigator.serviceWorker.controller) $('#updateBar').classList.remove('hidden'); };
+  const announce = () => { if (navigator.serviceWorker.controller) showUpdateBar(); };
   if (swReg.waiting) announce();
   swReg.addEventListener('updatefound', () => {
     const nw = swReg.installing;

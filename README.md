@@ -25,7 +25,18 @@ Files land in your Drive as:
     Books Curator / _Shelves / Study, case 2, shelf 3 / shelf.json
 
 Shelf photos are kept at the camera's full resolution: the small type at the
-foot of a spine is what the read needs.
+foot of a spine is what the read needs. They are never cropped.
+
+Book photos (the covers, jacket, spine, flaps and pages of a book the curator
+asks for) are cropped on the phone: you tap the corners, the app straightens the
+photo to them and keeps the cropped photo, with a thin margin beyond the edges, at
+the camera's detail, up to about 16 megapixels. If a corner is outside the photo,
+tap at the edge of the photo there. If any words are cut off, tap **Retake**. A
+page or flap also has two
+round dots, dragged to where it starts to curve down into the middle of the book.
+**Whole photo** keeps a photo as it was taken, when its edges cannot be set. The
+edges of the pages, a close-up corner, the gutter, a signature and "anything else"
+are saved whole.
 
 ## Getting it on your phone
 
@@ -74,8 +85,24 @@ asks the request service again when you upload it, to check that the curator sti
 for it. When the curator asks again for a whole book, the app first moves the photographs
 it sent for the earlier request into a folder inside the book's folder named
 "_not this book" with the date (for example when they were of another book); nothing is
-deleted. See
-[privacy.html](privacy.html) and [terms.html](terms.html).
+deleted.
+
+Book photos are cropped on the phone to the edges you set, with a thin margin
+beyond them. Unless you turn off **Help improve the cropping** in Settings (under
+**Book photos**), for every book photo you keep from the crop screen, cropped or
+kept whole with **Whole photo**, the app also keeps a smaller copy as you took it
+(1280 pixels or less on its longest side, no location data). With it goes a small
+file of the edges you set, which photograph it was, which way up it goes, a code
+that groups one book's photos without naming it, the app's version and the date and time:
+no names, titles or notes. After that book has uploaded, they go into a
+`_Crop examples` folder in your upload folder in Google Drive (the one set in Settings,
+Drive folder for uploads); Books Curator copies them from there
+into its own training folder, which gathers the examples of everyone who uses the
+app, and uses them only to improve the cropping in later versions of the app. They
+never go to the research service or to a library website. Turning the setting off
+and tapping **Save settings** stops new copies and deletes from the phone any not
+yet sent. Books Curator deletes its copies of yours within 10 business days of a
+written request. See [privacy.html](privacy.html) and [terms.html](terms.html).
 
 ## Developer notes
 
@@ -89,7 +116,8 @@ Unregister), otherwise the previous build is served from cache.
 phones then show a bar ("A new version is ready") and reload when the user taps
 **Update**. That relies on the service worker's cache name changing, so
 `bump-version.ps1` rewrites it — along with `APP_VERSION` in app.js, which
-Settings displays — on every commit that touches `index.html` or `app.js`. The
+Settings displays — on every commit that touches `index.html`, `app.js` or
+`detect.js`. The
 hook that runs it is in `hooks/`, and hooks don't survive a clone, so install it
 once per working copy:
 

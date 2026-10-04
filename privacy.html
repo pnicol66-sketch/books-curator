@@ -35,7 +35,7 @@ footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
 <body>
 
 <h1>Books Curator — Privacy Policy</h1>
-<p class="updated">Last updated 2 October 2026</p>
+<p class="updated">Last updated 3 October 2026</p>
 
 <p>Books Curator is a photography app for cataloguing books. It runs in your web
 browser on your own phone. Books Curator is provided by Paul Nicol, and where this page says
@@ -47,7 +47,12 @@ and <a href="#libraries">Private library websites</a>.</p>
 
 <div class="box">
   <p style="margin:0"><strong>The short version.</strong> The app keeps your photographs on
-  your phone and in your own Google Drive. When you open the app, it asks your curator's
+  your phone and in your own Google Drive. When you photograph a book's cover, jacket, spine,
+  flap or page, you set its edges and the app keeps the photograph cropped to them, with a thin
+  margin beyond the edges you set. Unless you turn it off, a smaller copy as you took it also
+  goes to your upload folder in Google Drive (the one set in Settings, Drive folder for
+  uploads), and Books Curator copies it into its own training folder to improve the cropping: see
+  <a href="#cropping">Cropping, and helping to improve it</a>. When you open the app, it asks your curator's
   request service (at script.google.com) which of your uploaded shelves have books to
   photograph. It sends only the Google Drive ids of folders the app created on your
   Drive (no photos, no names) and which kinds of request this version of the app can
@@ -69,7 +74,11 @@ and <a href="#libraries">Private library websites</a>.</p>
   time the app checks. The photographs and the details you entered leave the phone only
   when you upload them into your own Google Drive (next point); if you dictate, your
   browser's voice service hears what you say (see below). The app saves each
-  photograph as a fresh image, without location data.</li>
+  photograph as a fresh image, without location data. While "Help improve the cropping"
+  is on, the smaller copies described in <a href="#cropping">Cropping, and helping to
+  improve it</a> wait on the phone, go to your Drive after the book they came from has
+  uploaded, and are then deleted from the phone. A copy whose shelf's folder can no longer
+  be found is kept on the phone for a while, then deleted without being sent.</li>
   <li><strong>In your Google Drive, if you choose.</strong> When you upload (tap Upload,
   or tap Next shelf within about an hour of signing in to Google), the app copies that
   shelf's or book's photographs into a folder in <em>your own</em> Google Drive account,
@@ -112,7 +121,9 @@ the prompt shows the folder's name and the address.</p>
   you upload, or when you open a book your curator asks you to photograph in full</li>
   <li><code>www.googleapis.com</code> — to upload your photographs to your own Drive, when
   you upload, and to read back the record of a book it sent before (that book's
-  book.json), when your curator asks for the whole book</li>
+  book.json), when your curator asks for the whole book; and, while "Help improve the
+  cropping" is on, to put the smaller crop copies into the "_Crop examples" folder in
+  your Drive, after the book they came from has uploaded</li>
   <li><code>script.google.com</code> — your curator's request service. Once you have
   uploaded a shelf, the app asks it whether your curator would like any of your books
   photographed: automatically, at most once a minute, when the app opens or comes back
@@ -127,6 +138,39 @@ the prompt shows the folder's name and the address.</p>
 contacts it. The app uses no analytics, no advertising, no tracking, and no other
 third-party services. Voice dictation, if you use it, is provided by your phone's browser
 and follows its own privacy terms.</p>
+
+<h2 id="cropping">Cropping, and helping to improve it</h2>
+<p>After you photograph a book's cover, jacket, spine, flap or page, you set its edges on your
+phone and the app straightens the photograph to them. The cropped photograph is the one
+kept with the book and uploaded: the crop keeps a thin margin beyond the edges you set, and
+what lies outside that margin is not kept in the book's photographs. If the edges cannot be
+set, "Whole photo" keeps the photograph as you took it. While "Help improve the cropping"
+is on, a smaller copy as you took it is also kept, as described below. Shelf photographs
+are never cropped.</p>
+<p>Unless you turn it off in Settings ("Help improve the cropping", under "Book photos"),
+for every book photograph you keep from the crop screen, cropped or kept whole with "Whole
+photo", the app also keeps a smaller copy of it as you took it, before cropping, no more
+than 1280 pixels on its longest side and without location data. The copy shows the book as
+you photographed it, including its title and author and anything written in it, such as a
+name, and it may show what was around the book, such as the table or your hand. With it
+goes a small file of the edges you set, which photograph it was (for example "title page"),
+which way up it goes, a code that groups the photographs of one book without naming it,
+the app's version, the date and time, whether the book is a hardcover, a paperback or a
+two-photo request, whether the photo was cropped or kept whole, and the copy's size.
+Nothing else is added: no names, titles or notes. After that book's
+photographs have uploaded, they go into a folder named "_Crop examples" inside your upload
+folder. Books Curator copies them from there into its own
+training folder in its Google Drive, which gathers the examples of everyone who uses the
+app, and uses them only to make the app's cropping better in later versions, which
+everyone who uses the app receives. Those versions contain none of your photographs, and
+what they learned cannot be taken back out of a version already released. The copies
+never go to the research service or to a library website. Books Curator keeps them until
+the version of the app trained on them has been replaced, and never more than two years.
+If you ask in writing, Books Curator deletes its copies of yours within 10 business days.
+Turning the setting off and tapping "Save settings" stops new copies and deletes from your
+phone any not yet sent; so does "Turn it off" on the note the app shows the first time you
+keep a photograph from the crop screen. Copies in your Drive are yours to delete
+there.</p>
 
 <h2>Motion sensors</h2>
 <p>While the camera is open the app reads the phone's tilt sensor to draw a level line
@@ -144,6 +188,13 @@ title, on that list, so your curator's requests for it still appear. Photographs
 already in your Google Drive are yours to keep or delete there; copies your curator has
 already made stay in your curator's records: see <a href="#curator">After you share a
 folder with your curator</a>.</p>
+<p>Deleting a requested book from the phone also deletes the smaller crop copies of its
+photographs not yet sent. Delete ALL app data deletes them all and returns the app to its
+first settings, with Help improve the cropping ticked; the note shows again before anything
+is sent. Copies already in the
+"_Crop examples" folder in your Drive are yours to delete there. To have Books Curator
+delete its copies in its training folder, write to your curator or to the address below:
+they are deleted within 10 business days.</p>
 <p>To withdraw the app's access to your Google Drive, remove Books Curator from the
 third-party connections in your Google Account. Removing the app from your home screen
 may leave what it saved in your browser: use Delete ALL app data first, and say yes to
@@ -152,7 +203,11 @@ each question it asks.</p>
 <h2 id="curator">After you share a folder with your curator</h2>
 <p>Once your folder is shared, your curator's own tools read it to identify and document
 your books. They copy some photographs and details (such as shelf labels, notes, the name
-you entered and when you took the photographs) into your curator's own records. They send
+you entered and when you took the photographs) into your curator's own records. They copy
+the smaller crop copies in the "_Crop examples" folder into Books Curator's training
+folder, as <a href="#cropping">Cropping, and helping to improve it</a> describes. Books
+Curator may also test the app's cropping on its own computer with photographs you have
+already sent; they stay private and are not added to the training folder. They send
 reduced copies of your photographs (of shelves, and of books your curator asked for), with
 the labels and any copyright-page words you entered, to an outside research service that
 reads them and writes short notes on the books for your curator. They
